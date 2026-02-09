@@ -43,6 +43,7 @@ class Config:
     GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "")
     GITHUB_CLIENT_ID: str = os.getenv("GITHUB_CLIENT_ID", "")
     AI_MODEL: str = os.getenv("AI_MODEL", "gpt-4o-mini")
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
     # Tools
     BRAVE_API_KEY: str = os.getenv("BRAVE_API_KEY", "")
