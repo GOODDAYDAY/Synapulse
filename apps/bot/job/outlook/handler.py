@@ -1,4 +1,4 @@
-"""Gmail monitoring job — periodically fetch unseen emails via IMAP."""
+"""Outlook monitoring job — periodically fetch unseen emails via IMAP."""
 
 import asyncio
 import logging
@@ -7,13 +7,13 @@ from apps.bot.config.settings import config
 from apps.bot.job._imap import fetch_unseen
 from apps.bot.job.cron import CronJob
 
-logger = logging.getLogger("synapulse.job.gmail")
+logger = logging.getLogger("synapulse.job.outlook")
 
-IMAP_HOST = "imap.gmail.com"
+IMAP_HOST = "outlook.office365.com"
 
 
 class Job(CronJob):
-    name = "gmail_monitor"
+    name = "outlook_monitor"
     # Class defaults — overridable via jobs.json
     prompt = (
         "You are an email summarizer. Summarize this email in 2-4 sentences. "
@@ -22,21 +22,21 @@ class Job(CronJob):
     schedule = "*/5 * * * *"
 
     def validate(self) -> None:
-        """Check that Gmail secrets are set in .env."""
+        """Check that Outlook secrets are set in .env."""
         missing = []
-        if not config.GMAIL_ADDRESS:
-            missing.append("GMAIL_ADDRESS")
-        if not config.GMAIL_APP_PASSWORD:
-            missing.append("GMAIL_APP_PASSWORD")
+        if not config.OUTLOOK_ADDRESS:
+            missing.append("OUTLOOK_ADDRESS")
+        if not config.OUTLOOK_APP_PASSWORD:
+            missing.append("OUTLOOK_APP_PASSWORD")
         if missing:
             raise EnvironmentError(
-                f"{', '.join(missing)} required for gmail_monitor job. "
+                f"{', '.join(missing)} required for outlook_monitor job. "
                 "Set them in .env"
             )
 
     async def fetch(self) -> list[dict]:
         return await asyncio.to_thread(
-            fetch_unseen, IMAP_HOST, config.GMAIL_ADDRESS, config.GMAIL_APP_PASSWORD
+            fetch_unseen, IMAP_HOST, config.OUTLOOK_ADDRESS, config.OUTLOOK_APP_PASSWORD
         )
 
     async def process(self, item: dict, prompt: str) -> str:

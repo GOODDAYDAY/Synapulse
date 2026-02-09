@@ -59,8 +59,11 @@ bot/
     ├── base.py                     # BaseJob ABC (validate, format, start)
     ├── cron.py                     # CronJob(BaseJob) — interval-based scheduling
     ├── listen.py                   # ListenJob(BaseJob) — continuous listeners
-    └── gmail/
-        └── handler.py              # Gmail IMAP monitoring
+    ├── _imap.py                    # Shared IMAP utilities (fetch, decode, extract)
+    ├── gmail/
+    │   └── handler.py              # Gmail IMAP monitoring
+    └── outlook/
+        └── handler.py              # Outlook IMAP monitoring
 ```
 
 ## Message Flow
@@ -130,18 +133,20 @@ A concrete job inherits from `CronJob` or `ListenJob` and implements `fetch()` o
 
 Secrets via `.env` at project root. Operational job config in `config/jobs.json` (hot-reloadable).
 
-| Variable             | Required               | Default       | Description                              |
-|----------------------|------------------------|---------------|------------------------------------------|
-| `CHANNEL_TYPE`       | No                     | `discord`     | Which channel to use                     |
-| `DISCORD_TOKEN`      | When discord           | —             | Discord bot token                        |
-| `AI_PROVIDER`        | No                     | `mock`        | Which AI provider (`mock`, `copilot`)    |
-| `GITHUB_TOKEN`       | No                     | —             | GitHub token (auto-obtained if empty)    |
-| `GITHUB_CLIENT_ID`   | No                     | —             | OAuth App client ID for device flow auth |
-| `AI_MODEL`           | No                     | `gpt-4o-mini` | Model name                               |
-| `BRAVE_API_KEY`      | When brave_search tool | —             | Brave Search API key                     |
-| `GMAIL_ADDRESS`      | When gmail job         | —             | Gmail address for IMAP login             |
-| `GMAIL_APP_PASSWORD` | When gmail job         | —             | Gmail App Password                       |
-| `LOG_LEVEL`          | No                     | `DEBUG`       | Logging level                            |
+| Variable               | Required               | Default       | Description                              |
+|------------------------|------------------------|---------------|------------------------------------------|
+| `CHANNEL_TYPE`         | No                     | `discord`     | Which channel to use                     |
+| `DISCORD_TOKEN`        | When discord           | —             | Discord bot token                        |
+| `AI_PROVIDER`          | No                     | `mock`        | Which AI provider (`mock`, `copilot`)    |
+| `GITHUB_TOKEN`         | No                     | —             | GitHub token (auto-obtained if empty)    |
+| `GITHUB_CLIENT_ID`     | No                     | —             | OAuth App client ID for device flow auth |
+| `AI_MODEL`             | No                     | `gpt-4o-mini` | Model name                               |
+| `BRAVE_API_KEY`        | When brave_search tool | —             | Brave Search API key                     |
+| `GMAIL_ADDRESS`        | When gmail job         | —             | Gmail address for IMAP login             |
+| `GMAIL_APP_PASSWORD`   | When gmail job         | —             | Gmail App Password                       |
+| `OUTLOOK_ADDRESS`      | When outlook job       | —             | Outlook address for IMAP login           |
+| `OUTLOOK_APP_PASSWORD` | When outlook job       | —             | Outlook App Password                     |
+| `LOG_LEVEL`            | No                     | `DEBUG`       | Logging level                            |
 
 ### Job Config (`config/jobs.json`)
 

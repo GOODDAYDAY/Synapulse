@@ -51,6 +51,10 @@ class Config:
     GMAIL_ADDRESS: str = os.getenv("GMAIL_ADDRESS", "")
     GMAIL_APP_PASSWORD: str = os.getenv("GMAIL_APP_PASSWORD", "")
 
+    # Jobs — Outlook (secrets only; operational config in config/jobs.json)
+    OUTLOOK_ADDRESS: str = os.getenv("OUTLOOK_ADDRESS", "")
+    OUTLOOK_APP_PASSWORD: str = os.getenv("OUTLOOK_APP_PASSWORD", "")
+
     # General
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "DEBUG")
 
