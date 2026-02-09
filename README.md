@@ -18,11 +18,16 @@ Synapse + Pulse — A personal assistant powered by Discord and AI.
 
 ## Quick Start
 
+Requires **Python 3.11+**.
+
 ```bash
 pip install -r apps/bot/requirements.txt
-cp .env.example .env                       # fill in your tokens
+cp .env.example .env                       # fill in DISCORD_TOKEN at minimum
 python -m apps.bot.main                    # run from project root
 ```
+
+The bot runs with the `mock` AI provider by default — no AI keys needed to verify the setup. Set `AI_PROVIDER` in `.env`
+to switch to a real provider.
 
 ## Project Structure
 
