@@ -1,0 +1,49 @@
+import logging
+
+import aiohttp
+
+from apps.bot.config.settings import config
+
+logger = logging.getLogger("synapulse.provider.copilot")
+
+API_URL = "https://models.inference.ai.azure.com/chat/completions"
+
+SYSTEM_PROMPT = (
+    "You are Synapulse, a helpful personal assistant on Discord. "
+    "Keep responses concise and friendly. Reply in the same language the user uses."
+)
+
+
+async def chat(message: str) -> str:
+    if not config.GITHUB_TOKEN:
+        logger.warning("GITHUB_TOKEN not set, falling back to echo mode")
+        return f"[AI not configured] Echo: {message}"
+
+    headers = {
+        "Authorization": f"Bearer {config.GITHUB_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": config.AI_MODEL,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": message},
+        ],
+    }
+
+    logger.debug("Sending chat request (model=%s, length=%d)", config.AI_MODEL, len(message))
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(API_URL, headers=headers, json=payload) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    logger.error("AI API error %d: %s", resp.status, text[:200])
+                    return f"[AI Error {resp.status}] {text[:200]}"
+                data = await resp.json()
+                reply = data["choices"][0]["message"]["content"] or "..."
+                logger.debug("Chat response received (length=%d)", len(reply))
+                return reply
+    except Exception:
+        logger.exception("Unexpected error during AI chat request")
+        return "[AI Error] Request failed"
