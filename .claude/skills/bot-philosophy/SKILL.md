@@ -26,6 +26,7 @@ Each layer has exactly one job. Peer layers never import each other:
 - **channel/** — Platform I/O. Passive.
 - **provider/** — AI API adapter. Passive.
 - **tool/** — Capabilities. Passive.
+- **job/** — Background tasks. Passive (receives callbacks from core).
 - **config/** — Static settings and prompts. Shared.
 
 ## 3. Core Orchestrates Everything
@@ -33,16 +34,13 @@ Each layer has exactly one job. Peer layers never import each other:
 Core is the sole orchestrator. It controls the entire lifecycle: loading, wiring, and the runtime loop. Other layers are
 passive — they expose methods but never initiate cross-layer communication.
 
-This is **inversion of control**: core injects callbacks into channel, sets tool definitions on provider, and drives the
-tool-call loop. Channel, provider, and tool never reach out to each other or back to core.
+This is **inversion of control**: core injects callbacks into channel and jobs, sets tool definitions on provider, and
+drives the tool-call loop. Channel, provider, tool, and job never reach out to each other or back to core.
 
 ## 4. Self-Validating Implementations
 
-Each implementation validates its own config. Config class only loads and displays values — it has zero knowledge of
-which fields belong to which implementation.
-
-Adding a new provider/channel/tool that needs a new env var requires **zero changes** to `config/settings.py`. The new
-implementation handles its own validation in `authenticate()`, `validate()`, or similar lifecycle methods.
+Each implementation validates its own config in `authenticate()`, `validate()`, or similar lifecycle methods.
+Config class loads and displays values — it never decides which fields belong to which implementation.
 
 No central if-else. No match-case. Ever.
 
@@ -53,6 +51,7 @@ Dynamic loading via `importlib`. Class names are convention:
 - Provider exports `Provider`
 - Channel exports `Channel`
 - Tool exports `Tool`
+- Job exports `Job`
 
 No factory, no registry, no mapping dict. Add a folder with the right class name — core finds it automatically.
 

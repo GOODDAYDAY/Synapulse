@@ -39,7 +39,9 @@ bot/
 │   ├── jobs.py                     # load_job_config() — re-reads JSON each call
 │   └── logs/                       # Log files (git-ignored)
 ├── core/
-│   └── handler.py                  # Orchestration: load all layers, tool-call loop
+│   ├── handler.py                  # Bootstrap: config → provider → tools → jobs → channel
+│   ├── loader.py                   # Dynamic discovery: scan_tools(), scan_jobs()
+│   └── mention.py                  # Tool-call loop: make_mention_handler()
 ├── provider/
 │   ├── base.py                     # BaseProvider, OpenAIProvider, AnthropicProvider
 │   ├── mock/
@@ -102,7 +104,7 @@ sets `summarize` on each job, and starts all jobs. Each job self-manages its ena
 
 ```
 BaseProvider (ABC)
-├── OpenAIProvider        → for OpenAI-compatible APIs (GitHub Models, Azure, etc.)
+├── OpenAIProvider        → for OpenAI-compatible APIs (Copilot, Ollama, etc.)
 └── AnthropicProvider     → for Anthropic API
 ```
 
