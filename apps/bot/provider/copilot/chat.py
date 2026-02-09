@@ -2,6 +2,7 @@ import logging
 
 import aiohttp
 
+from apps.bot.config.prompts import SYSTEM_PROMPT
 from apps.bot.config.settings import config
 from apps.bot.provider.base import BaseProvider
 from apps.bot.provider.copilot.auth import get_token
@@ -9,11 +10,6 @@ from apps.bot.provider.copilot.auth import get_token
 logger = logging.getLogger("synapulse.provider.copilot")
 
 API_URL = "https://models.inference.ai.azure.com/chat/completions"
-
-SYSTEM_PROMPT = (
-    "You are Synapulse, a helpful personal assistant on Discord. "
-    "Keep responses concise and friendly. Reply in the same language the user uses."
-)
 
 
 class Provider(BaseProvider):
