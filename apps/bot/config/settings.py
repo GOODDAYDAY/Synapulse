@@ -1,3 +1,12 @@
+"""
+Global configuration loaded from .env at project root.
+
+This module only handles loading and displaying config values.
+Validation of specific fields is delegated to each provider/channel
+via their authenticate() / validate() methods — Config does NOT
+know which fields belong to which implementation.
+"""
+
 import logging
 import os
 from dataclasses import dataclass, fields
@@ -14,6 +23,7 @@ _MASKED_KEYWORDS = {"TOKEN", "SECRET", "KEY", "PASSWORD"}
 
 
 def _mask(name: str, value: str) -> str:
+    """Mask sensitive values for safe logging."""
     if not value:
         return "<empty>"
     if any(kw in name.upper() for kw in _MASKED_KEYWORDS):
@@ -30,24 +40,14 @@ class Config:
     # AI
     AI_PROVIDER: str = os.getenv("AI_PROVIDER", "mock")
     GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "")
+    GITHUB_CLIENT_ID: str = os.getenv("GITHUB_CLIENT_ID", "")
     AI_MODEL: str = os.getenv("AI_MODEL", "gpt-4o-mini")
 
     # General
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "DEBUG")
 
-    def validate(self) -> None:
-        missing = []
-        if self.CHANNEL_TYPE == "discord" and not self.DISCORD_TOKEN:
-            missing.append("DISCORD_TOKEN")
-        if self.AI_PROVIDER == "github" and not self.GITHUB_TOKEN:
-            missing.append("GITHUB_TOKEN")
-        if missing:
-            raise EnvironmentError(
-                f"Required env var(s) not set: {', '.join(missing)}. "
-                f"Check your .env file at {_root / '.env'}"
-            )
-
     def log_summary(self) -> None:
+        """Print all config values with secrets masked."""
         logger.info("--- Config loaded ---")
         for f in fields(self):
             logger.info("  %s = %s", f.name, _mask(f.name, getattr(self, f.name)))

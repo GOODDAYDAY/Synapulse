@@ -1,8 +1,12 @@
 import logging
 
+from apps.bot.provider.base import BaseProvider
+
 logger = logging.getLogger("synapulse.provider.mock")
 
 
-async def chat(message: str) -> str:
-    logger.debug("Mock chat called (length=%d)", len(message))
-    return "mock hello"
+class Provider(BaseProvider):
+
+    async def chat(self, message: str) -> str:
+        logger.debug("Mock chat called (length=%d)", len(message))
+        return "mock hello"
