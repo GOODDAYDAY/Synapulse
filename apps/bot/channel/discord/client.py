@@ -1,5 +1,6 @@
 """Discord channel — handles all Discord-specific I/O."""
 
+import asyncio
 import logging
 
 import discord
@@ -18,6 +19,7 @@ class Channel(BaseChannel):
         intents = discord.Intents.default()
         intents.message_content = True
         self._bot = discord.Client(intents=intents)
+        self._ready = asyncio.Event()
 
     def validate(self) -> None:
         """Ensure Discord token is configured."""
@@ -37,6 +39,7 @@ class Channel(BaseChannel):
             for guild in bot.guilds:
                 channels = [ch.name for ch in guild.text_channels]
                 logger.info("  Guild: %s | text channels: %s", guild.name, ", ".join(channels))
+            self._ready.set()
 
         @bot.event
         async def on_message(message: discord.Message):
@@ -75,7 +78,7 @@ class Channel(BaseChannel):
 
     async def wait_until_ready(self) -> None:
         """Block until the Discord client is connected and ready."""
-        await self._bot.wait_until_ready()
+        await self._ready.wait()
 
     async def send(self, channel_id: str, message: str) -> None:
         """Send a message to a Discord channel by ID."""

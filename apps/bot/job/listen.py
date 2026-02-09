@@ -45,6 +45,9 @@ class ListenJob(BaseJob):
                 await asyncio.sleep(60)
                 continue
 
+            # JSON value takes priority; fall back to class default if absent.
+            # Re-evaluated every tick, so editing jobs.json takes effect
+            # without restarting the bot.
             prompt = cfg.get("prompt", self.prompt)
             logger.info("Job %s entering listener", self.name)
 

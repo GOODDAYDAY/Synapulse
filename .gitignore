@@ -210,3 +210,7 @@ __marimo__/
 # idea
 .idea/
 /nul
+
+# config
+/apps/bot/config/jobs.json
+/apps/bot/config/jobs.json.bak

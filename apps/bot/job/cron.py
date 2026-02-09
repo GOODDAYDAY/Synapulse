@@ -49,25 +49,44 @@ class CronJob(BaseJob):
                 await asyncio.sleep(60)
                 continue
 
-            # Resolve schedule and prompt (JSON overrides class defaults)
+            # Resolve schedule and prompt:
+            # JSON value takes priority; fall back to class default if absent.
+            # Re-evaluated every tick, so editing jobs.json takes effect
+            # without restarting the bot.
             schedule = cfg.get("schedule", self.schedule)
             prompt = cfg.get("prompt", self.prompt)
+            logger.info(
+                "Job %s active: schedule=%s, notify_channel=%s, prompt=%s",
+                self.name, schedule, notify_channel,
+                f"{prompt[:50]}..." if len(prompt) > 50 else (prompt or "<none>"),
+            )
 
             # Compute next cron time and sleep until then
             cron = croniter(schedule, datetime.now(timezone.utc))
             next_time = cron.get_next(datetime)
             delay = (next_time - datetime.now(timezone.utc)).total_seconds()
+            logger.info("Job %s next tick at %s (%.0fs)", self.name, next_time, delay)
             if delay > 0:
-                logger.debug("Job %s sleeping %.0fs until next tick", self.name, delay)
                 await asyncio.sleep(delay)
 
-            # Fetch and process items
+            # Fetch items
+            logger.info("Job %s fetching...", self.name)
             try:
                 items = await self.fetch()
-                if items:
-                    logger.info("Job %s fetched %d item(s)", self.name, len(items))
-                for item in items:
+            except Exception:
+                logger.exception("Job %s fetch failed", self.name)
+                continue
+
+            if not items:
+                logger.info("Job %s fetched 0 items, nothing to do", self.name)
+                continue
+
+            # Process and notify
+            logger.info("Job %s fetched %d item(s), processing", self.name, len(items))
+            try:
+                for i, item in enumerate(items, 1):
                     message = await self.process(item, prompt)
                     await notify(notify_channel, message)
+                    logger.info("Job %s notified item %d/%d", self.name, i, len(items))
             except Exception:
-                logger.exception("Job %s tick failed", self.name)
+                logger.exception("Job %s processing failed", self.name)

@@ -4,6 +4,7 @@ import asyncio
 import email
 import imaplib
 import logging
+from datetime import datetime, timedelta, timezone
 from email.header import decode_header
 
 from apps.bot.config.settings import config
@@ -44,26 +45,40 @@ def _extract_text(msg: email.message.Message) -> str:
 
 
 def _fetch_unseen_emails() -> list[dict]:
-    """Connect to Gmail IMAP, fetch UNSEEN emails, mark them as SEEN."""
+    """Connect to Gmail IMAP, fetch recent UNSEEN emails, mark them as SEEN.
+
+    Combines UNSEEN + SINCE (2 days ago) so the first run doesn't pull
+    the entire mailbox history. IMAP fetch marks emails as SEEN, so
+    subsequent runs only return new arrivals.
+    """
+    since_date = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%d-%b-%Y")
+    logger.info("Connecting to %s as %s", IMAP_HOST, config.GMAIL_ADDRESS)
     conn = imaplib.IMAP4_SSL(IMAP_HOST)
     try:
         conn.login(config.GMAIL_ADDRESS, config.GMAIL_APP_PASSWORD)
         conn.select("INBOX")
+        logger.info("IMAP login successful, searching UNSEEN SINCE %s", since_date)
 
-        _, data = conn.search(None, "UNSEEN")
+        _, data = conn.search(None, f"(UNSEEN SINCE {since_date})")
         msg_ids = data[0].split()
         if not msg_ids:
+            logger.info("No unseen emails found")
             return []
 
+        logger.info("Found %d unseen email(s), fetching", len(msg_ids))
         results = []
         for mid in msg_ids:
             _, msg_data = conn.fetch(mid, "(RFC822)")
             raw = msg_data[0][1]
             msg = email.message_from_bytes(raw)
 
+            subject = _decode_header(msg.get("Subject", ""))
+            sender = _decode_header(msg.get("From", ""))
+            logger.info("  Email: from=%s, subject=%s", sender, subject)
+
             results.append({
-                "from": _decode_header(msg.get("From", "")),
-                "subject": _decode_header(msg.get("Subject", "")),
+                "from": sender,
+                "subject": subject,
                 "date": msg.get("Date", ""),
                 "body": _extract_text(msg)[:2000],
             })
@@ -71,6 +86,7 @@ def _fetch_unseen_emails() -> list[dict]:
     finally:
         try:
             conn.logout()
+            logger.info("IMAP connection closed")
         except Exception:
             pass
 
