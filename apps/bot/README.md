@@ -7,9 +7,9 @@ The core bot application of Synapulse.
 ```
 channel/*  ──→  core/handler  ──→  provider/*
   (I/O)        (orchestrate)      (AI adapter)
-                    ↕
-                  tool/*
-               (capabilities)
+                    ↕                  ↑
+                  tool/*            job/*
+               (capabilities)   (background)
 ```
 
 High cohesion, low coupling. Each layer has one job:
@@ -20,7 +20,10 @@ High cohesion, low coupling. Each layer has one job:
 - **provider/** — AI API adapter. Formats messages for a specific LLM API. Knows nothing about channels or tools.
 - **tool/** — Capabilities (search, etc.). Each tool defines itself and formats its definition for different APIs. Knows
   nothing about other layers.
-- **config/** — Settings, logging, and prompts. Shared by all layers.
+- **job/** — Background tasks (monitoring, listeners). Each job fetches data, asks the AI to summarize, and notifies a
+  channel. Knows nothing about other layers — receives `notify` callback from core, `summarize` set as attribute.
+- **config/** — Settings, logging, prompts, and job config. Shared by all layers. Secrets in `.env`, operational job
+  config in `config/jobs.json` (hot-reloadable).
 
 ## Directory Structure
 
@@ -32,6 +35,8 @@ bot/
 │   ├── settings.py                 # Frozen dataclass, secret masking
 │   ├── logging.py                  # dictConfig with console + rotating file
 │   ├── prompts.py                  # Static system prompt
+│   ├── jobs.json                   # Hot-reloadable job config (schedule, channel, prompt)
+│   ├── jobs.py                     # load_job_config() — re-reads JSON each call
 │   └── logs/                       # Log files (git-ignored)
 ├── core/
 │   └── handler.py                  # Orchestration: load all layers, tool-call loop
@@ -46,10 +51,16 @@ bot/
 │   ├── base.py                     # BaseChannel ABC (validate + run)
 │   └── discord/
 │       └── client.py               # Discord event listener & reply
-└── tool/
-    ├── base.py                     # BaseTool, OpenAITool, AnthropicTool
-    └── brave_search/
-        └── handler.py              # Brave Search API
+├── tool/
+│   ├── base.py                     # BaseTool, OpenAITool, AnthropicTool
+│   └── brave_search/
+│       └── handler.py              # Brave Search API
+└── job/
+    ├── base.py                     # BaseJob ABC (validate, format, start)
+    ├── cron.py                     # CronJob(BaseJob) — interval-based scheduling
+    ├── listen.py                   # ListenJob(BaseJob) — continuous listeners
+    └── gmail/
+        └── handler.py              # Gmail IMAP monitoring
 ```
 
 ## Message Flow
@@ -65,6 +76,20 @@ bot/
 8. core returns final reply to channel
 9. channel/discord sends reply in Discord
 ```
+
+## Job Pipeline
+
+```
+1. Job fetches new items (IMAP, webhook, etc.)
+2. job.format_for_ai(item) → text for AI
+3. job.summarize(prompt, text) → AI summary  (attribute set by core, wraps provider.chat)
+4. job.format_notification(item, summary) → Discord message
+5. notify(notify_channel, message) → send to Discord  (callback from channel)
+```
+
+Jobs run as background tasks alongside the reactive @mention flow. Core scans `job/` subdirectories at startup,
+sets `summarize` on each job, and starts all jobs. Each job self-manages its enabled/disabled state by reading
+`config/jobs.json` on every tick (hot reload — no restart needed).
 
 ## Base Classes
 
@@ -90,20 +115,38 @@ BaseTool (ABC)
 A tool inherits from one or more format mixins. Core calls `tool.to_{api_format}()` to get the right format, then sets
 the list on `provider.tools`.
 
+### Job Hierarchy
+
+```
+BaseJob (ABC)
+├── CronJob              → interval-based scheduling (fetch → process → sleep)
+└── ListenJob            → continuous event stream (async for item in listen())
+```
+
+A concrete job inherits from `CronJob` or `ListenJob` and implements `fetch()` or `listen()`. The pipeline
+(AI summarize → notify) is handled by the base class.
+
 ## Configuration
 
-All config via `.env` at project root.
+Secrets via `.env` at project root. Operational job config in `config/jobs.json` (hot-reloadable).
 
-| Variable           | Required               | Default       | Description                              |
-|--------------------|------------------------|---------------|------------------------------------------|
-| `CHANNEL_TYPE`     | No                     | `discord`     | Which channel to use                     |
-| `DISCORD_TOKEN`    | When discord           | —             | Discord bot token                        |
-| `AI_PROVIDER`      | No                     | `mock`        | Which AI provider (`mock`, `copilot`)    |
-| `GITHUB_TOKEN`     | No                     | —             | GitHub token (auto-obtained if empty)    |
-| `GITHUB_CLIENT_ID` | No                     | —             | OAuth App client ID for device flow auth |
-| `AI_MODEL`         | No                     | `gpt-4o-mini` | Model name                               |
-| `BRAVE_API_KEY`    | When brave_search tool | —             | Brave Search API key                     |
-| `LOG_LEVEL`        | No                     | `DEBUG`       | Logging level                            |
+| Variable             | Required               | Default       | Description                              |
+|----------------------|------------------------|---------------|------------------------------------------|
+| `CHANNEL_TYPE`       | No                     | `discord`     | Which channel to use                     |
+| `DISCORD_TOKEN`      | When discord           | —             | Discord bot token                        |
+| `AI_PROVIDER`        | No                     | `mock`        | Which AI provider (`mock`, `copilot`)    |
+| `GITHUB_TOKEN`       | No                     | —             | GitHub token (auto-obtained if empty)    |
+| `GITHUB_CLIENT_ID`   | No                     | —             | OAuth App client ID for device flow auth |
+| `AI_MODEL`           | No                     | `gpt-4o-mini` | Model name                               |
+| `BRAVE_API_KEY`      | When brave_search tool | —             | Brave Search API key                     |
+| `GMAIL_ADDRESS`      | When gmail job         | —             | Gmail address for IMAP login             |
+| `GMAIL_APP_PASSWORD` | When gmail job         | —             | Gmail App Password                       |
+| `LOG_LEVEL`          | No                     | `DEBUG`       | Logging level                            |
+
+### Job Config (`config/jobs.json`)
+
+Schedule, notify channel, prompt, and enabled/disabled state for each job. Edited at runtime — changes take
+effect on the next tick without restarting the bot. See the `manage-jobs` skill for schema details.
 
 ## Authentication (Copilot Provider)
 

@@ -1,5 +1,7 @@
-from apps.bot.config.settings import config
+import asyncio
+
 from apps.bot.config.logging import setup_logging
+from apps.bot.config.settings import config
 
 setup_logging(config.LOG_LEVEL)
 
@@ -7,7 +9,7 @@ setup_logging(config.LOG_LEVEL)
 def main():
     from apps.bot.core.handler import start
 
-    start()
+    asyncio.run(start())
 
 
 if __name__ == "__main__":

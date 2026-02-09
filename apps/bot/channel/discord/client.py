@@ -14,6 +14,11 @@ HISTORY_LIMIT = 5
 
 class Channel(BaseChannel):
 
+    def __init__(self) -> None:
+        intents = discord.Intents.default()
+        intents.message_content = True
+        self._bot = discord.Client(intents=intents)
+
     def validate(self) -> None:
         """Ensure Discord token is configured."""
         if not config.DISCORD_TOKEN:
@@ -22,11 +27,9 @@ class Channel(BaseChannel):
                 "Get yours at https://discord.com/developers/applications"
             )
 
-    def run(self, on_mention: MentionHandler) -> None:
+    async def run(self, on_mention: MentionHandler) -> None:
         """Start the Discord client and listen for @mentions."""
-        intents = discord.Intents.default()
-        intents.message_content = True
-        bot = discord.Client(intents=intents)
+        bot = self._bot
 
         @bot.event
         async def on_ready():
@@ -64,8 +67,18 @@ class Channel(BaseChannel):
             async with message.channel.typing():
                 reply = await on_mention(content, history)
 
-            # await message.reply(reply)  # quote the original message
-            await message.channel.send(reply)  # plain message, no quote
+            await message.channel.send(reply)
 
         logger.info("Starting Discord client...")
-        bot.run(config.DISCORD_TOKEN, log_handler=None)
+        async with bot:
+            await bot.start(config.DISCORD_TOKEN, reconnect=True)
+
+    async def wait_until_ready(self) -> None:
+        """Block until the Discord client is connected and ready."""
+        await self._bot.wait_until_ready()
+
+    async def send(self, channel_id: str, message: str) -> None:
+        """Send a message to a Discord channel by ID."""
+        ch = self._bot.get_channel(int(channel_id))
+        if ch:
+            await ch.send(message)

@@ -1,0 +1,8 @@
+{
+  "gmail_monitor": {
+    "enabled": false,
+    "schedule": "*/5 * * * *",
+    "notify_channel": "",
+    "prompt": "You are an email summarizer. Summarize this email in 2-4 sentences. Capture the key point and any action items. Be concise."
+  }
+}

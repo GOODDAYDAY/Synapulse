@@ -17,5 +17,13 @@ class BaseChannel(ABC):
         """Override to validate channel-specific config before starting."""
 
     @abstractmethod
-    def run(self, on_mention: MentionHandler) -> None:
+    async def run(self, on_mention: MentionHandler) -> None:
         """Start listening and call on_mention when triggered."""
+
+    @abstractmethod
+    async def wait_until_ready(self) -> None:
+        """Block until the channel is connected and ready to send."""
+
+    @abstractmethod
+    async def send(self, channel_id: str, message: str) -> None:
+        """Send a message to the given channel."""
