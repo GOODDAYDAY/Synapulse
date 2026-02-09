@@ -50,7 +50,7 @@ class Channel(BaseChannel):
                 content = "Hello!"
 
             # Acknowledge with reaction
-            await message.add_reaction("\U0000261d")
+            await message.add_reaction("\U0001f64b\u200d\u2640\ufe0f")
 
             # Gather recent history for context
             history = []
@@ -64,7 +64,8 @@ class Channel(BaseChannel):
             async with message.channel.typing():
                 reply = await on_mention(content, history)
 
-            await message.reply(reply)
+            # await message.reply(reply)  # quote the original message
+            await message.channel.send(reply)  # plain message, no quote
 
         logger.info("Starting Discord client...")
         bot.run(config.DISCORD_TOKEN, log_handler=None)

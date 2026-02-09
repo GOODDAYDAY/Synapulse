@@ -7,12 +7,13 @@ via their authenticate() / validate() methods — Config does NOT
 know which fields belong to which implementation.
 """
 
-import logging
 import os
 from dataclasses import dataclass, fields
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+import logging
 
 _root = Path(__file__).resolve().parent.parent.parent.parent
 load_dotenv(_root / ".env")
@@ -42,6 +43,9 @@ class Config:
     GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "")
     GITHUB_CLIENT_ID: str = os.getenv("GITHUB_CLIENT_ID", "")
     AI_MODEL: str = os.getenv("AI_MODEL", "gpt-4o-mini")
+
+    # Tools
+    BRAVE_API_KEY: str = os.getenv("BRAVE_API_KEY", "")
 
     # General
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "DEBUG")

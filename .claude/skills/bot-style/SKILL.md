@@ -1,146 +1,129 @@
 ---
 name: bot-style
-description: Architecture and code style for the Synapulse bot. Apply these rules when writing or modifying code under apps/bot/.
+description: Implementation details and code conventions for the Synapulse bot. Contracts, call chains, and style rules for apps/bot/.
 disable-model-invocation: false
 user-invocable: false
 ---
 
-When writing or modifying code under `apps/bot/`, follow these conventions:
+# Implementation Details
 
-## Architecture — High Cohesion, Low Coupling
+Concrete contracts, patterns, and style rules for `apps/bot/`.
 
-### Call Chain
+## Call Chain
 
 ```
 main.py → core/handler.start()
                ├─ config.log_summary()
                ├─ importlib: load provider by AI_PROVIDER
                │       ├─ Provider()
-               │       └─ provider.authenticate()   ← provider validates its own config
+               │       └─ provider.authenticate()
+               ├─ _scan_tools(): auto-scan tool/ subfolders
+               │       └─ tool.validate()
+               ├─ _format_tools_for_provider(tools, provider.api_format)
+               │       └─ tool.to_{api_format}() → list[dict]
+               ├─ provider.tools = formatted list
                ├─ importlib: load channel by CHANNEL_TYPE
                │       ├─ Channel()
-               │       └─ channel.validate()         ← channel validates its own config
+               │       └─ channel.validate()
                └─ channel.run(on_mention=handle_mention)
                        ↓
-              channel receives message → calls on_mention callback
+              channel receives message → calls on_mention(content, history)
                        ↓
-              core builds prompt → calls provider.chat()
+              core builds prompt → provider.build_messages(system, user)
                        ↓
-              channel sends reply
+              provider.chat(messages) → ChatResponse
+                       ↓
+              if tool_calls: core executes tools → provider.append_tool_result() → loop
+                       ↓
+              channel sends final reply
 ```
 
-### Core is the brain
+## Base Class Contracts
 
-- **main.py** — Bootstrap only: init logging, then call `core.start()`. No orchestration logic here.
-- **core/** — THE orchestrator. Dynamically loads channel and provider, calls their lifecycle methods, injects callbacks. All coordination lives here.
-- **channel/** — Platform I/O only. NEVER import from `core/` or `provider/`. Receives a callback and calls it.
-- **provider/** — Pure AI calls. NEVER import from `core/` or `channel/`.
-- **config/** — Settings and logging, shared by all layers.
+```
+provider/base.py
+├─ BaseProvider (ABC)
+│    api_format: str                                       class attribute
+│    tools: list[dict]                                     property, set by core
+│    authenticate()                                        optional override
+│    build_messages(system_prompt, user_prompt) -> list     abstract
+│    append_tool_result(messages, tool_call, result)        abstract
+│    parse_tool_calls(raw_msg) -> list[ToolCall]           abstract
+│    chat(messages) -> ChatResponse                        abstract
+├─ OpenAIProvider(BaseProvider)                            api_format = "openai"
+│    implements build_messages, append_tool_result, parse_tool_calls
+└─ AnthropicProvider(BaseProvider)                         api_format = "anthropic"
+     implements build_messages, append_tool_result, parse_tool_calls
 
-### Self-Validating Implementations — No Central if-else
+tool/base.py
+├─ BaseTool (ABC)
+│    name, description, parameters (JSON Schema)           class attributes
+│    validate()                                            optional override
+│    execute(**kwargs) -> str                               abstract
+├─ OpenAITool(BaseTool)                                    mixin
+│    to_openai() -> dict
+└─ AnthropicTool(BaseTool)                                 mixin
+     to_anthropic() -> dict
 
-Config does NOT know which fields belong to which implementation. Each implementation validates itself:
+channel/base.py
+└─ BaseChannel (ABC)
+     validate()                                            optional override
+     run(on_mention: MentionHandler)                       abstract
 
-- `BaseProvider.authenticate()` — provider checks its own credentials (e.g. copilot resolves GITHUB_TOKEN from .env, or runs OAuth Device Flow, auto-saving to .env)
-- `BaseChannel.validate()` — channel checks its own config (e.g. discord checks DISCORD_TOKEN)
-- `Config` class only loads and displays values. NEVER add implementation-specific if-else to Config.
+Data classes (provider/base.py):
+  ToolCall(id, name, arguments)
+  ChatResponse(text, tool_calls)
+```
 
-This means adding a new provider/channel that needs a new env var requires ZERO changes to `config/settings.py` validation logic — the new implementation handles it.
+## Dependency Direction
 
-### Authentication Pattern — Graceful Fallback with Auto-Persist
+```
+main → core → channel (via callback injection)
+         ├──→ provider (tools set by core, messages passed by core)
+         └──→ tool (executed by core, formatted by core)
+```
 
-Provider authentication tries sources in order and auto-persists credentials. Example (copilot):
+- channel, provider, tool import NOTHING from each other or from core.
+- config/ is the only shared import across all layers.
+
+## Authentication (Copilot)
 
 ```
 .env (GITHUB_TOKEN) → OAuth Device Flow (GITHUB_CLIENT_ID) → RuntimeError
                               ↓
-                        save to .env
+                        auto-save to .env
 ```
 
-Once a token is obtained, it is saved to `.env` so subsequent runs use it directly.
+Form-encoded POST to GitHub. Prints verification code, opens browser, polls for token.
 
-### Base Classes — Explicit Contracts
+## Extending
 
-```
-provider/base.py → BaseProvider
-    authenticate()              optional, override for auth at startup
-    chat(message) -> str        required, abstract
-
-channel/base.py → BaseChannel
-    validate()                  optional, override for config checks
-    run(on_mention)             required, abstract
-```
-
-Each implementation module exports a class named `Provider` or `Channel` that extends the base. Core instantiates via dynamic import — no factory, no registry, just convention.
-
-### Dynamic Loading — No match-case, No if-else
-
-Channel and provider are loaded purely by `.env` values via `importlib`:
-
-```python
-# AI_PROVIDER=mock → apps.bot.provider.mock.chat → Provider class
-importlib.import_module(f"apps.bot.provider.{config.AI_PROVIDER}.chat")
-
-# CHANNEL_TYPE=discord → apps.bot.channel.discord.client → Channel class
-importlib.import_module(f"apps.bot.channel.{config.CHANNEL_TYPE}.client")
-```
-
-No match-case, no if-else in core. Add a new provider/channel by creating the folder — core doesn't change.
-
-### Dependency Direction
-
-```
-main → core → channel (via callback injection)
-         ↓
-       provider
-```
-
-- core dynamically imports channel and provider.
-- channel imports NOTHING from core or provider. It only calls the callback it was given.
-- provider imports NOTHING from core or channel.
-- This is inversion of control: core injects behavior into channel, not the other way around.
-
-### Extending
-
-- New channel: add `channel/<name>/client.py` with `class Channel(BaseChannel)`. Set `CHANNEL_TYPE=<name>` in `.env`.
-- New AI provider: add `provider/<name>/chat.py` with `class Provider(BaseProvider)`. Set `AI_PROVIDER=<name>` in `.env`.
-- New feature (skill, agent, ...): core orchestrates it; channel and provider stay focused on their single responsibility.
+- **New channel**: `channel/<name>/client.py` → `class Channel(BaseChannel)`. Set `CHANNEL_TYPE=<name>`.
+- **New provider**: `provider/<name>/chat.py` → `class Provider(OpenAIProvider)` or `class Provider(AnthropicProvider)`.
+  Set `AI_PROVIDER=<name>`.
+- **New tool**: `tool/<name>/handler.py` → `class Tool(OpenAITool, AnthropicTool)`. Auto-scanned — no config change.
 
 ## Logging
 
-- Every module gets its own logger: `logger = logging.getLogger("synapulse.<module_name>")`
-- Logger names follow the package path: `synapulse.config`, `synapulse.provider.mock`, `synapulse.discord`
-- Log levels:
-  - `DEBUG` — verbose trace (message content, payload sizes, response snippets)
-  - `INFO` — key lifecycle events (bot online, config loaded, connection established)
-  - `WARNING` — degraded but functional (missing optional config, fallback activated)
-  - `ERROR` — failures that affect the user (API errors, missing required config)
-  - `EXCEPTION` — unexpected errors (use `logger.exception()` inside except blocks)
+- Logger per module: `logger = logging.getLogger("synapulse.<module>")`
+- Lazy formatting: `logger.info("Got %s", value)` not f-strings
 - All log messages in English
-- Use lazy formatting: `logger.info("Got %s", value)` not `logger.info(f"Got {value}")`
-- Never log secrets; use the `_mask()` helper from `config/settings.py` when logging config values
+- Never log secrets; use `_mask()` from config
+- Levels: DEBUG (trace), INFO (lifecycle), WARNING (degraded), ERROR (failures), EXCEPTION (unexpected)
 
 ## Configuration
 
-- All env vars are defined in `config/settings.py` as fields on the frozen `Config` dataclass
-- Access via the singleton: `from apps.bot.config.settings import config`
-- Config only loads and displays. Validation is delegated to each implementation's lifecycle methods
-- Optional vars have sensible defaults
-- Selection (channel type, AI provider) is done via `.env` with defaults, so the bot runs out of the box
-
-## Imports
-
-- Standard library → third-party → local app, separated by blank lines
-- Local imports use absolute paths: `from apps.bot.config.settings import config`
-- Lazy imports (inside functions) only when needed to avoid circular deps
+- Frozen `Config` dataclass in `config/settings.py`
+- Access: `from apps.bot.config.settings import config`
+- Static prompts in `config/prompts.py`
+- Config only loads and displays — validation delegated to implementations
 
 ## Code Style
 
-- Python 3.11 type hints (use `TypeAlias` for type aliases, `str | None` for unions)
-- `async/await` for all I/O-bound operations
-- No `__init__.py` files unless package-level initialization is needed
-- `if __name__ == "__main__"` only in the single external entry point (`main.py`). No other module should have it.
-- Keep modules focused: one responsibility per file
-- Prefer guard clauses (positive `if` → do work → return) over negative checks (`if not` → raise). Happy path reads top-down, error at the bottom.
+- Python 3.11 type hints (`str | None`, `TypeAlias`)
+- `async/await` for all I/O
+- No empty `__init__.py`
+- Imports: stdlib → third-party → local, separated by blank lines
+- Absolute imports: `from apps.bot.config.settings import config`
 - Add docstrings to modules, classes, and public functions
-- Catch specific exceptions; use bare `except Exception` only as a last resort with `logger.exception()`
+- Catch specific exceptions; bare `except Exception` only with `logger.exception()`

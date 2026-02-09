@@ -1,12 +1,14 @@
+"""Mock provider — returns a fixed response for testing."""
+
 import logging
 
-from apps.bot.provider.base import BaseProvider
+from apps.bot.provider.base import ChatResponse, OpenAIProvider
 
 logger = logging.getLogger("synapulse.provider.mock")
 
 
-class Provider(BaseProvider):
+class Provider(OpenAIProvider):
 
-    async def chat(self, message: str) -> str:
-        logger.debug("Mock chat called (length=%d)", len(message))
-        return "mock hello"
+    async def chat(self, messages: list) -> ChatResponse:
+        logger.debug("Mock chat called (messages=%d)", len(messages))
+        return ChatResponse(text="mock hello")
