@@ -57,6 +57,10 @@ class Config:
     OUTLOOK_ADDRESS: str = os.getenv("OUTLOOK_ADDRESS", "")
     OUTLOOK_APP_PASSWORD: str = os.getenv("OUTLOOK_APP_PASSWORD", "")
 
+    # Jobs — QQ Mail (secrets only; operational config in config/jobs.json)
+    QQ_MAIL_ADDRESS: str = os.getenv("QQ_MAIL_ADDRESS", "")
+    QQ_MAIL_APP_PASSWORD: str = os.getenv("QQ_MAIL_APP_PASSWORD", "")
+
     # General
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "DEBUG")
 

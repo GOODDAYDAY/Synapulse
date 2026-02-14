@@ -39,12 +39,20 @@ def extract_text(msg: email.message.Message) -> str:
     return ""
 
 
+MAX_FETCH = 20
+
+
 def fetch_unseen(host: str, address: str, password: str) -> list[dict]:
     """Connect to an IMAP server, fetch recent UNSEEN emails, mark them as SEEN.
 
     Combines UNSEEN + SINCE (2 days ago) so the first run doesn't pull
     the entire mailbox history. IMAP fetch marks emails as SEEN, so
     subsequent runs only return new arrivals.
+
+    Some providers (notably QQ Mail) don't sync web/app read status with the
+    IMAP \\Seen flag, and may ignore the SINCE filter. MAX_FETCH caps the
+    number of emails fetched per run to protect against mailbox explosions.
+    Only the most recent emails are fetched (highest IMAP sequence numbers).
     """
     since_date = (datetime.now(timezone.utc) - timedelta(days=2)).strftime("%d-%b-%Y")
     logger.info("Connecting to %s as %s", host, address)
@@ -60,7 +68,16 @@ def fetch_unseen(host: str, address: str, password: str) -> list[dict]:
             logger.info("No unseen emails found")
             return []
 
-        logger.info("Found %d unseen email(s), fetching", len(msg_ids))
+        # Cap to most recent emails (highest sequence numbers = newest).
+        if len(msg_ids) > MAX_FETCH:
+            logger.warning(
+                "Found %d unseen emails, capping to newest %d",
+                len(msg_ids), MAX_FETCH,
+            )
+            msg_ids = msg_ids[-MAX_FETCH:]
+        else:
+            logger.info("Found %d unseen email(s), fetching", len(msg_ids))
+
         results = []
         for mid in msg_ids:
             _, msg_data = conn.fetch(mid, "(RFC822)")
