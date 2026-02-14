@@ -86,6 +86,9 @@ class CronJob(BaseJob):
             try:
                 for i, item in enumerate(items, 1):
                     message = await self.process(item, prompt)
+                    if not message:
+                        logger.info("Job %s skipped item %d/%d (filtered)", self.name, i, len(items))
+                        continue
                     await notify(notify_channel, message)
                     logger.info("Job %s notified item %d/%d", self.name, i, len(items))
             except Exception:

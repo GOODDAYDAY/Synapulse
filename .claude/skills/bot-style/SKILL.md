@@ -126,8 +126,13 @@ job/base.py
 ├─ CronJob(BaseJob)
 │    schedule: str                                         cron expression (overridable via jobs.json)
 │    fetch() -> list[dict]                                 abstract
-└─ ListenJob(BaseJob)
-     listen() -> AsyncIterator[dict]                       abstract
+├─ ListenJob(BaseJob)
+│    listen() -> AsyncIterator[dict]                       abstract
+└─ EmailCronJob(CronJob)  [job/_imap.py]
+     prompt: _EMAIL_PROMPT                                 classify + tag + filter ads
+     process(item, prompt) -> str                          returns "" to skip ads
+     format_for_ai(item) -> str                            From/Subject/Date/Body
+     format_notification(item, summary) -> str             Discord markdown
 
 Data classes (provider/base.py):
   ToolCall(id, name, arguments)
@@ -154,6 +159,7 @@ main → core → channel (via callback injection)
 - **New tool**: `tool/<name>/handler.py` → `class Tool(OpenAITool, AnthropicTool)`. Auto-scanned — no config change.
 - **New job**: `job/<name>/handler.py` → `class Job(CronJob)` or `class Job(ListenJob)`. Auto-scanned — configure via
   `jobs.json`.
+- **New email job**: `job/<name>/handler.py` → `class Job(EmailCronJob)`. Only needs `name`, `validate()`, `fetch()`.
 
 ## Code Style
 
