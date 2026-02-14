@@ -14,6 +14,7 @@ class BaseTool(ABC):
     name: str
     description: str
     parameters: dict  # JSON Schema
+    usage_hint: str = ""  # Short routing hint for system prompt (falls back to description)
 
     def validate(self) -> None:
         """Override to validate tool-specific config (e.g. API keys)."""

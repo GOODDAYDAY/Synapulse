@@ -17,7 +17,7 @@ class Provider(OpenAIProvider):
             raise RuntimeError("OLLAMA_BASE_URL is required for ollama provider")
         logger.info("Ollama endpoint: %s", config.OLLAMA_BASE_URL)
 
-    async def chat(self, messages: list) -> ChatResponse:
+    async def chat(self, messages: list, tool_choice: str | None = None) -> ChatResponse:
         url = f"{config.OLLAMA_BASE_URL}/v1/chat/completions"
         headers = {"Content-Type": "application/json"}
         payload = {
@@ -26,6 +26,8 @@ class Provider(OpenAIProvider):
         }
         if self.tools:
             payload["tools"] = self.tools
+            if tool_choice:
+                payload["tool_choice"] = tool_choice
 
         logger.debug("Sending chat request (model=%s, messages=%d)", config.AI_MODEL, len(messages))
 

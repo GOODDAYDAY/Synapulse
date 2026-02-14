@@ -1,8 +1,9 @@
 """
-Static default prompts shared across all AI providers.
+Prompt templates shared across all AI providers.
 
-These are base context prompts that define the bot's identity and behavior.
-Providers import SYSTEM_PROMPT and prepend it to every conversation.
+SYSTEM_PROMPT defines the bot's identity and behavior (static).
+TOOLS_GUIDANCE is the general tool-use preamble, injected only when tools are loaded.
+Per-tool routing hints come from each tool's usage_hint attribute — see core/loader.py.
 """
 
 SYSTEM_PROMPT = (
@@ -29,7 +30,13 @@ SYSTEM_PROMPT = (
     "- Offer recommendations: books, tools, solutions\n"
     "\n"
     "## Constraints\n"
-    "- Do not fabricate facts — if unsure, qualify your answer\n"
-    "- Do not execute actions outside the conversation (no file access, no web browsing)\n"
+    "- Do not fabricate facts — if unsure, use a tool or say you don't know\n"
     "- Keep responses focused and relevant to the user's request\n"
+)
+
+TOOLS_GUIDANCE = (
+    "You have tools. NEVER guess when a tool can get real data.\n"
+    "For complex tasks, first briefly tell the user your plan (what steps you will take), "
+    "then execute each step with tool calls. Do NOT stop after one tool call — keep going "
+    "until the task is FULLY done. Only give your final answer when all steps are complete.\n"
 )

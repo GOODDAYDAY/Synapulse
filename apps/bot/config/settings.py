@@ -47,6 +47,7 @@ class Config:
 
     # Tools
     BRAVE_API_KEY: str = os.getenv("BRAVE_API_KEY", "")
+    LOCAL_FILES_ALLOWED_PATHS: str = os.getenv("LOCAL_FILES_ALLOWED_PATHS", "")
 
     # Jobs — Gmail (secrets only; operational config in config/jobs.json)
     GMAIL_ADDRESS: str = os.getenv("GMAIL_ADDRESS", "")

@@ -57,8 +57,10 @@ bot/
 │       └── client.py               # Discord event listener & reply
 ├── tool/
 │   ├── base.py                     # BaseTool, OpenAITool, AnthropicTool
-│   └── brave_search/
-│       └── handler.py              # Brave Search API
+│   ├── brave_search/
+│   │   └── handler.py              # Brave Search API
+│   └── local_files/
+│       └── handler.py              # Read-only local file browser
 └── job/
     ├── base.py                     # BaseJob ABC (validate, format, start)
     ├── cron.py                     # CronJob(BaseJob) — interval-based scheduling
@@ -79,9 +81,10 @@ bot/
 4. channel/discord calls on_mention callback (injected by core)
 5. core builds messages via provider.build_messages(system_prompt, user_prompt)
 6. core calls provider.chat(messages) → ChatResponse
-7. if tool_calls: core executes tools → provider.append_tool_result() → repeat from 6
-8. core returns final reply to channel
-9. channel/discord sends reply in Discord
+7. if tool_calls: core executes tools → provider.append_tool_result() → sleep 1s → repeat from 6
+8. loop ends when AI returns text (no tool calls), or after 10 rounds
+9. core returns final reply to channel
+10. channel/discord sends reply in Discord
 ```
 
 ## Job Pipeline
@@ -137,21 +140,22 @@ A concrete job inherits from `CronJob` or `ListenJob` and implements `fetch()` o
 
 Secrets via `.env` at project root. Operational job config in `config/jobs.json` (hot-reloadable).
 
-| Variable               | Required               | Default                  | Description                                     |
-|------------------------|------------------------|--------------------------|-------------------------------------------------|
-| `CHANNEL_TYPE`         | No                     | `discord`                | Which channel to use                            |
-| `DISCORD_TOKEN`        | When discord           | —                        | Discord bot token                               |
-| `AI_PROVIDER`          | No                     | `mock`                   | Which AI provider (`mock`, `copilot`, `ollama`) |
-| `GITHUB_TOKEN`         | No                     | —                        | GitHub token (auto-obtained if empty)           |
-| `GITHUB_CLIENT_ID`     | No                     | —                        | OAuth App client ID for device flow auth        |
-| `AI_MODEL`             | No                     | `gpt-4o-mini`            | Model name                                      |
-| `OLLAMA_BASE_URL`      | No                     | `http://localhost:11434` | Ollama API endpoint                             |
-| `BRAVE_API_KEY`        | When brave_search tool | —                        | Brave Search API key                            |
-| `GMAIL_ADDRESS`        | When gmail job         | —                        | Gmail address for IMAP login                    |
-| `GMAIL_APP_PASSWORD`   | When gmail job         | —                        | Gmail App Password                              |
-| `OUTLOOK_ADDRESS`      | When outlook job       | —                        | Outlook address for IMAP login                  |
-| `OUTLOOK_APP_PASSWORD` | When outlook job       | —                        | Outlook App Password                            |
-| `LOG_LEVEL`            | No                     | `DEBUG`                  | Logging level                                   |
+| Variable                    | Required               | Default                  | Description                                     |
+|-----------------------------|------------------------|--------------------------|-------------------------------------------------|
+| `CHANNEL_TYPE`              | No                     | `discord`                | Which channel to use                            |
+| `DISCORD_TOKEN`             | When discord           | —                        | Discord bot token                               |
+| `AI_PROVIDER`               | No                     | `mock`                   | Which AI provider (`mock`, `copilot`, `ollama`) |
+| `GITHUB_TOKEN`              | No                     | —                        | GitHub token (auto-obtained if empty)           |
+| `GITHUB_CLIENT_ID`          | No                     | —                        | OAuth App client ID for device flow auth        |
+| `AI_MODEL`                  | No                     | `gpt-4o-mini`            | Model name                                      |
+| `OLLAMA_BASE_URL`           | No                     | `http://localhost:11434` | Ollama API endpoint                             |
+| `BRAVE_API_KEY`             | When brave_search tool | —                        | Brave Search API key                            |
+| `LOCAL_FILES_ALLOWED_PATHS` | When local_files tool  | —                        | Comma-separated allowed root paths              |
+| `GMAIL_ADDRESS`             | When gmail job         | —                        | Gmail address for IMAP login                    |
+| `GMAIL_APP_PASSWORD`        | When gmail job         | —                        | Gmail App Password                              |
+| `OUTLOOK_ADDRESS`           | When outlook job       | —                        | Outlook address for IMAP login                  |
+| `OUTLOOK_APP_PASSWORD`      | When outlook job       | —                        | Outlook App Password                            |
+| `LOG_LEVEL`                 | No                     | `DEBUG`                  | Logging level                                   |
 
 ### Job Config (`config/jobs.json`)
 

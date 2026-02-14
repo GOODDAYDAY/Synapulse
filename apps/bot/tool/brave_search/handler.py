@@ -19,6 +19,7 @@ class Tool(OpenAITool, AnthropicTool):
         "Use this when the user asks about recent events, real-time data, "
         "or anything you are unsure about."
     )
+    usage_hint = "Current events, real-time data, or facts you're unsure about."
     parameters = {
         "type": "object",
         "properties": {

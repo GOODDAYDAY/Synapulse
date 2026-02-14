@@ -19,6 +19,7 @@ main.py → core/handler.start()
                │       └─ provider.authenticate()
                ├─ core/loader.scan_tools(): auto-scan tool/ subfolders
                │       └─ tool.validate()
+               ├─ core/loader.format_tool_hints(tools) → per-tool routing hints
                ├─ core/loader.format_tools_for_provider(tools, provider.api_format)
                │       └─ tool.to_{api_format}() → list[dict]
                ├─ provider.tools = formatted list
@@ -36,17 +37,23 @@ main.py → core/handler.start()
 ```
 channel receives message → calls on_mention(content, history)
        ↓
-core/mention.handle_mention:
+core/mention.make_mention_handler (once at startup):
+  system_prompt = SYSTEM_PROMPT + "## Tools\n" + TOOLS_GUIDANCE + format_tool_hints(tools)
+       ↓
+core/mention.handle_mention (per message):
   build user prompt from content + history
        ↓
-  provider.build_messages(SYSTEM_PROMPT, user_prompt)
+  provider.build_messages(system_prompt, user_prompt)
        ↓
   loop (max 10 rounds):
     provider.chat(messages) → ChatResponse
     if text (no tool_calls): return text
+    provider.compress_tool_results(messages)  ← shrink consumed results
     for each tool_call:
+      jsonschema.validate(args, tool.parameters)  ← reject bad args early
       tool.execute(**args) → result
       provider.append_tool_result(messages, call, result)
+    sleep 1s  (rate-limit protection between rounds)
        ↓
   channel sends final reply
 ```
@@ -81,7 +88,8 @@ provider/base.py
 │    build_messages(system_prompt, user_prompt) -> list     abstract
 │    append_tool_result(messages, tool_call, result)        abstract
 │    parse_tool_calls(raw_msg) -> list[ToolCall]           abstract
-│    chat(messages) -> ChatResponse                        abstract
+│    compress_tool_results(messages, threshold)            abstract
+│    chat(messages, tool_choice=None) -> ChatResponse      abstract
 ├─ OpenAIProvider(BaseProvider)                            api_format = "openai"
 │    implements build_messages, append_tool_result, parse_tool_calls
 └─ AnthropicProvider(BaseProvider)                         api_format = "anthropic"
@@ -90,6 +98,7 @@ provider/base.py
 tool/base.py
 ├─ BaseTool (ABC)
 │    name, description, parameters (JSON Schema)           class attributes
+│    usage_hint: str = ""                                  routing hint for system prompt
 │    validate()                                            optional override
 │    execute(**kwargs) -> str                               abstract
 ├─ OpenAITool(BaseTool)                                    mixin

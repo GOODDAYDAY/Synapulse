@@ -22,7 +22,7 @@ class Provider(OpenAIProvider):
     def authenticate(self) -> None:
         self._token = get_token()
 
-    async def chat(self, messages: list) -> ChatResponse:
+    async def chat(self, messages: list, tool_choice: str | None = None) -> ChatResponse:
         headers = {
             "Authorization": f"Bearer {self._token}",
             "Content-Type": "application/json",
@@ -33,6 +33,8 @@ class Provider(OpenAIProvider):
         }
         if self.tools:
             payload["tools"] = self.tools
+            if tool_choice:
+                payload["tool_choice"] = tool_choice
 
         logger.debug("Sending chat request (model=%s, messages=%d)", config.AI_MODEL, len(messages))
 

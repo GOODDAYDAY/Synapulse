@@ -33,6 +33,15 @@ def scan_tools() -> dict:
     return tools
 
 
+def format_tool_hints(tools: dict) -> str:
+    """Build per-tool routing hints for the system prompt from usage_hint attributes."""
+    lines = []
+    for tool in tools.values():
+        hint = tool.usage_hint or tool.description
+        lines.append(f"- {tool.name}: {hint}")
+    return "\n".join(lines)
+
+
 def format_tools_for_provider(tools: dict, api_format: str) -> list[dict]:
     """Convert tools to the provider's API format via tool.to_{api_format}()."""
     method_name = f"to_{api_format}"

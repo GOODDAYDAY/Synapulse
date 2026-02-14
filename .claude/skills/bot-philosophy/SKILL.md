@@ -65,7 +65,30 @@ Different API formats are handled through parallel hierarchies:
 A tool can inherit from multiple format mixins to support multiple APIs. Core reads `provider.api_format`, then calls
 `tool.to_{format}()` to bridge the two.
 
-## 7. Guard Clause Style
+## 7. Code Does Mechanics, AI Does Decisions
+
+Code handles mechanical tasks: traversal, I/O, formatting. AI handles decisions: matching, relevance, judgment.
+
+Never write code that decides what "matches" a user's intent — that's the AI's job. Code collects data and hands it
+over; AI interprets and chooses.
+
+Example: when the user asks "find my resume", code recursively lists the directory tree; AI looks at the results and
+decides which entry is the resume.
+
+## 8. Token-Conscious Orchestration
+
+Tool results are consumed once by the AI, then compressed. The core never sends the same large payload twice.
+
+When the AI has responded to a set of tool results (proving it has processed them), those results are replaced with a
+brief size note in the message history. This keeps context lean across multi-round tool loops.
+
+Rule: only the **latest round's** tool results are sent in full. Everything older is compressed. The threshold is low
+(200 chars) — short results like error messages or "No results found." stay intact because they cost almost nothing.
+
+This is the highest-leverage optimization for token cost in agent loops. A 5-round file browsing session that would
+accumulate 30-50K tokens of stale tool results now stays under 5K.
+
+## 9. Guard Clause Style
 
 Prefer positive `if` → do work → return. Errors and exceptions go at the bottom. The happy path reads top-down.
 
@@ -84,16 +107,16 @@ if config.GITHUB_CLIENT_ID:
 raise RuntimeError("No auth method available")
 ```
 
-## 8. Single Entry Point
+## 10. Single Entry Point
 
 Only `main.py` has `if __name__ == "__main__"`. No other module should have it. Every other module is imported and
 called — never run directly.
 
-## 9. No Empty `__init__.py`
+## 11. No Empty `__init__.py`
 
 Only create `__init__.py` when package-level initialization is genuinely needed. Empty init files are noise.
 
-## 10. Preserve Existing Logic
+## 12. Preserve Existing Logic
 
 Never accidentally delete or overwrite working code. When modifying a file, understand what exists first, then make
 targeted changes. Lost logic is expensive.

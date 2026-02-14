@@ -62,8 +62,21 @@ class BaseProvider(ABC):
         """Parse tool calls from a raw AI response message."""
 
     @abstractmethod
-    async def chat(self, messages: list) -> ChatResponse:
-        """Send messages to AI. Appends assistant response to messages. Returns parsed response."""
+    def compress_tool_results(self, messages: list, threshold: int) -> None:
+        """Replace consumed tool results exceeding threshold with a size note.
+
+        Called by core after provider.chat() returns — at that point the AI has
+        already processed all tool results in messages. Compressing them avoids
+        re-sending large payloads on subsequent rounds.
+        """
+
+    @abstractmethod
+    async def chat(self, messages: list, tool_choice: str | None = None) -> ChatResponse:
+        """Send messages to AI. Appends assistant response to messages. Returns parsed response.
+
+        tool_choice: optional hint passed to the API (e.g. "auto", "required", "none").
+        Only takes effect when tools are loaded. Default None means provider default.
+        """
 
 
 class OpenAIProvider(BaseProvider):
@@ -96,6 +109,15 @@ class OpenAIProvider(BaseProvider):
             for tc in raw_msg["tool_calls"]
         ]
 
+    def compress_tool_results(self, messages: list, threshold: int) -> None:
+        for msg in messages:
+            if msg.get("role") != "tool":
+                continue
+            content = msg.get("content", "")
+            if len(content) > threshold:
+                logger.debug("Compressing tool result: %d chars", len(content))
+                msg["content"] = f"[Compressed result: {len(content)} chars]"
+
 
 class AnthropicProvider(BaseProvider):
     """Provider format for Anthropic API."""
@@ -126,3 +148,15 @@ class AnthropicProvider(BaseProvider):
             for block in content
             if block.get("type") == "tool_use"
         ]
+
+    def compress_tool_results(self, messages: list, threshold: int) -> None:
+        for msg in messages:
+            if not isinstance(msg.get("content"), list):
+                continue
+            for block in msg["content"]:
+                if block.get("type") != "tool_result":
+                    continue
+                content = block.get("content", "")
+                if isinstance(content, str) and len(content) > threshold:
+                    logger.debug("Compressing tool result: %d chars", len(content))
+                    block["content"] = f"[Compressed result: {len(content)} chars]"

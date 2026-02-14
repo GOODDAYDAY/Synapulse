@@ -11,6 +11,8 @@ from apps.bot.config.settings import config
 logger = logging.getLogger("synapulse.discord")
 
 HISTORY_LIMIT = 5
+# Discord enforces a 2000-character limit per message.
+DISCORD_MSG_LIMIT = 2000
 
 
 class Channel(BaseChannel):
@@ -70,7 +72,7 @@ class Channel(BaseChannel):
             async with message.channel.typing():
                 reply = await on_mention(content, history)
 
-            await message.channel.send(reply)
+            await self._send_chunks(message.channel, reply)
 
         logger.info("Starting Discord client...")
         async with bot:
@@ -84,4 +86,18 @@ class Channel(BaseChannel):
         """Send a message to a Discord channel by ID."""
         ch = self._bot.get_channel(int(channel_id))
         if ch:
-            await ch.send(message)
+            await self._send_chunks(ch, message)
+
+    @staticmethod
+    async def _send_chunks(channel: discord.abc.Messageable, text: str) -> None:
+        """Split long text into chunks that fit Discord's message limit."""
+        while text:
+            if len(text) <= DISCORD_MSG_LIMIT:
+                await channel.send(text)
+                return
+            # Try to split at the last newline within the limit.
+            cut = text.rfind("\n", 0, DISCORD_MSG_LIMIT)
+            if cut == -1:
+                cut = DISCORD_MSG_LIMIT
+            await channel.send(text[:cut])
+            text = text[cut:].lstrip("\n")
