@@ -32,11 +32,14 @@ pre-set servers, and a conversational tool for managing servers through Discord 
 
 - **Main flow**:
     - New config file `apps/bot/config/mcp.json` defining pre-set MCP servers
-    - Format follows the standard MCP configuration convention:
+  - Pre-configured with 55 popular MCP servers (GitHub, Notion, filesystem, databases, DevOps, etc.), all
+    `enabled: false` by default
+  - Format follows the standard MCP configuration convention, with an `enabled` field:
       ```json
       {
         "mcpServers": {
           "filesystem": {
+            "enabled": false,
             "command": "npx",
             "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/docs"],
             "env": {},
@@ -45,25 +48,38 @@ pre-set servers, and a conversational tool for managing servers through Discord 
         }
       }
       ```
-    - On startup, bot reads this file and auto-connects to all configured servers
+  - `enabled` field: `true` = connect on startup, `false` = skip. Defaults to `true` if omitted (backward compatibility)
+  - On startup, bot reads this file and auto-connects to all servers with `enabled: true`
+  - **Hot-reload**: A background task polls `mcp.json` every 30 seconds. Changes to the file (enable/disable servers,
+    modify config) take effect automatically without restart
+  - Hot-reload detects three types of changes: newly enabled servers → connect; disabled/removed servers → disconnect;
+    config changed for existing server → reconnect
+  - To enable/disable a pre-configured server, edit the `enabled` field in `mcp.json` directly — the hot-reload loop
+    handles the rest
     - Config file is optional — if missing or empty, bot starts normally with no MCP servers
 - **Error handling**:
     - Invalid JSON → log warning, skip MCP entirely
     - Individual server connection failure → skip that server, continue with others
+  - Hot-reload failure → log error, retry on next interval
 - **Edge cases**:
     - Empty `mcpServers` object → no MCP connections, no error
-    - Config file created after first startup → takes effect on next restart
+  - Config file created after first startup → detected by hot-reload within 30 seconds
+  - Server with empty env values (e.g., `"GITHUB_TOKEN": ""`) → connected but env vars passed as-is; user should fill
+    values before enabling
 
 ### F-02 MCP Server Management Tool (Conversational)
 
 - **Main flow**:
-    - New AI tool `mcp_server` with actions: `add`, `remove`, `list`, `list_tools`
+    - New AI tool `mcp_server` for managing **dynamic** MCP servers (not pre-configured ones)
+    - Actions: `add`, `remove`, `list`, `list_tools`
     - `add(name, command, args?, env?, timeout?)` → connect to the server, discover tools, persist config
     - `remove(name)` → disconnect session, remove from persisted config
     - `list()` → show all connected servers with status and tool count
     - `list_tools(name?)` → show tools provided by a specific server or all servers
     - Server configs added via chat are persisted to a JSON file (`data/mcp_servers.json`) so they survive restarts
     - On startup, reconnect to both static (`config/mcp.json`) and dynamic (`data/mcp_servers.json`) servers
+    - **Separation of concerns**: Pre-configured servers (mcp.json) are managed by editing the config file directly (
+      F-01 hot-reload handles the rest). This tool only manages dynamically added servers
 - **Error handling**:
     - Connection failure on add → return error to AI, do not persist
     - Server name conflict (same name in static and dynamic) → dynamic takes precedence, log warning
@@ -124,25 +140,29 @@ pre-set servers, and a conversational tool for managing servers through Discord 
 - SSE / Streamable HTTP transport (stdio only for v1)
 - MCP Resources and Prompts (Tools only)
 - MCP sampling (letting MCP servers call back to the AI)
-- Hot-reload of static config file (restart required)
+- ~~Hot-reload of static config file~~ (implemented in v2, see F-01)
 - Web UI for MCP management
 
 ## 6. Acceptance Criteria
 
-| ID    | Feature | Condition                                                  | Expected Result                                                       |
-|:------|:--------|:-----------------------------------------------------------|:----------------------------------------------------------------------|
-| AC-01 | F-01    | Configure a filesystem MCP server in `mcp.json`, start bot | Bot logs show MCP connection success and discovered tools             |
-| AC-02 | F-01    | Configure an invalid MCP server in `mcp.json`, start bot   | Bot starts normally, logs warning for failed connection               |
-| AC-03 | F-02    | User says "connect a GitHub MCP server" in Discord         | AI calls mcp_server.add, connects, reports discovered tools           |
-| AC-04 | F-02    | User says "what MCP servers do I have?"                    | AI lists all connected servers with tool counts                       |
-| AC-05 | F-02    | User says "disconnect the filesystem server"               | AI removes the server, MCP tools from that server no longer available |
-| AC-06 | F-02    | Restart bot after adding a server via chat                 | Server auto-reconnects from persisted config                          |
-| AC-07 | F-03    | MCP server crashes during a conversation                   | AI receives error message, other tools still work                     |
-| AC-08 | F-04    | AI asked a question that requires an MCP tool              | AI calls the MCP tool, gets result, answers the user                  |
-| AC-09 | F-04    | Both native tool and MCP tool are relevant                 | AI can call either or both in the same conversation                   |
+| ID    | Feature | Condition                                                    | Expected Result                                                       |
+|:------|:--------|:-------------------------------------------------------------|:----------------------------------------------------------------------|
+| AC-01 | F-01    | Configure a filesystem MCP server in `mcp.json`, start bot   | Bot logs show MCP connection success and discovered tools             |
+| AC-02 | F-01    | Configure an invalid MCP server in `mcp.json`, start bot     | Bot starts normally, logs warning for failed connection               |
+| AC-03 | F-02    | User says "connect a GitHub MCP server" in Discord           | AI calls mcp_server.add, connects, reports discovered tools           |
+| AC-04 | F-02    | User says "what MCP servers do I have?"                      | AI lists all connected servers with tool counts                       |
+| AC-05 | F-02    | User says "disconnect the filesystem server"                 | AI removes the server, MCP tools from that server no longer available |
+| AC-06 | F-02    | Restart bot after adding a server via chat                   | Server auto-reconnects from persisted config                          |
+| AC-07 | F-03    | MCP server crashes during a conversation                     | AI receives error message, other tools still work                     |
+| AC-08 | F-04    | AI asked a question that requires an MCP tool                | AI calls the MCP tool, gets result, answers the user                  |
+| AC-09 | F-04    | Both native tool and MCP tool are relevant                   | AI can call either or both in the same conversation                   |
+| AC-10 | F-01    | Edit mcp.json to set `enabled: true` for a server            | Hot-reload connects the server within 30 seconds                      |
+| AC-11 | F-01    | Edit mcp.json to set `enabled: false` for a connected server | Hot-reload disconnects the server within 30 seconds                   |
+| AC-12 | F-01    | Change a server's command/args in mcp.json while running     | Hot-reload reconnects the server with new config                      |
 
 ## 7. Change Log
 
-| Version | Date       | Changes         | Affected Scope | Reason |
-|:--------|:-----------|:----------------|:---------------|:-------|
-| v1      | 2026-03-10 | Initial version | ALL            | -      |
+| Version | Date       | Changes                                                                                                          | Affected Scope                   | Reason                                                                                   |
+|:--------|:-----------|:-----------------------------------------------------------------------------------------------------------------|:---------------------------------|:-----------------------------------------------------------------------------------------|
+| v1      | 2026-03-10 | Initial version                                                                                                  | ALL                              | -                                                                                        |
+| v2      | 2026-03-10 | Add `enabled` field, hot-reload, 55 pre-configured servers; clarify mcp_server tool only manages dynamic servers | F-01, F-02, Section 5, Section 6 | Separation of concerns: config file editing for static servers, tool for dynamic servers |

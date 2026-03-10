@@ -1,7 +1,11 @@
-"""MCP server management tool — add, remove, list MCP servers via conversation.
+"""MCP server management tool — add, remove, list dynamically added MCP servers.
 
-Allows the AI to manage MCP server connections dynamically in response
-to user requests. Persists dynamic configs to survive restarts.
+Allows the AI to manage dynamic MCP server connections in response to user
+requests. Dynamic servers are persisted to data/mcp_servers.json.
+
+Pre-configured servers in mcp.json are managed by editing the config file
+directly — the hot-reload loop detects changes and connects/disconnects
+automatically.
 """
 
 import logging
@@ -20,7 +24,7 @@ class Tool(OpenAITool, AnthropicTool):
     name = "mcp_server"
     description = (
         "Manage MCP (Model Context Protocol) servers. "
-        "Add new tool servers, remove existing ones, or list connected servers and their tools."
+        "Add new servers dynamically, remove them, or list connected servers and their tools."
     )
     parameters = {
         "type": "object",
@@ -28,15 +32,21 @@ class Tool(OpenAITool, AnthropicTool):
             "action": {
                 "type": "string",
                 "enum": ["add", "remove", "list", "list_tools"],
-                "description": "Action to perform",
+                "description": (
+                    "Action to perform. "
+                    "'add' connects a new MCP server process. "
+                    "'remove' disconnects and removes a dynamically added server. "
+                    "'list' shows connected servers. "
+                    "'list_tools' shows tools from connected servers."
+                ),
             },
             "name": {
                 "type": "string",
-                "description": "Server name (for add, remove, list_tools). Alphanumeric and underscores only.",
+                "description": "Server name. Alphanumeric and underscores only.",
             },
             "command": {
                 "type": "string",
-                "description": "Command to run the MCP server (for add), e.g. 'npx', 'python'",
+                "description": "Command to run the MCP server (for add), e.g. 'npx', 'uvx'",
             },
             "args": {
                 "type": "array",
@@ -54,7 +64,9 @@ class Tool(OpenAITool, AnthropicTool):
         },
         "required": ["action"],
     }
-    usage_hint = "Manage MCP tool servers: add, remove, list servers and their tools"
+    usage_hint = (
+        "Manage dynamic MCP tool servers: add/remove servers, list servers and their tools"
+    )
 
     # Injected by core at startup
     mcp_manager: Any = None
@@ -102,6 +114,7 @@ class Tool(OpenAITool, AnthropicTool):
             return f"Error: maximum {_MAX_SERVERS} servers reached"
 
         config = {
+            "enabled": True,
             "command": command,
             "args": args or [],
             "timeout": timeout,

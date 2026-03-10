@@ -116,7 +116,8 @@ core ──→ provider      (unchanged)
 
 ### 4.3 MCP Server Management Tool (`apps/bot/tool/mcp_server/handler.py`)
 
-- **Responsibility**: AI tool for managing MCP servers via conversation
+- **Responsibility**: AI tool for managing **dynamic** MCP servers via conversation. Pre-configured servers (mcp.json)
+  are managed by editing the config file directly — the hot-reload loop (4.4) handles connect/disconnect automatically.
 - **Public interface**: Standard tool contract (`name`, `description`, `parameters`, `execute`)
 - **Actions**:
     - `add(name, command, args?, env?, timeout?)` → `mcp_manager.connect(...)` → persist to `data/mcp_servers.json` →
@@ -124,7 +125,10 @@ core ──→ provider      (unchanged)
     - `remove(name)` → `mcp_manager.disconnect(...)` → remove from persisted config (if dynamic)
     - `list()` → `mcp_manager.list_servers()` → formatted server list with tool counts
     - `list_tools(name?)` → `mcp_manager.list_tools(name)` → formatted tool list
-- **MCP Manager injection**: `mcp_manager` attribute set by core at startup (same pattern as `tool.db`)
+- **Separation of concerns**: This tool does NOT read/write `mcp.json`. Static server enable/disable is a file-editing
+  operation, not a tool action. This follows high cohesion / low coupling — each component has one job.
+- **MCP Manager injection**: `mcp_manager` and `_rebuild_tools` callback set by core at startup (same pattern as
+  `tool.db`)
 - **Dynamic config persistence**:
     - On `add`: write updated config to `data/mcp_servers.json`
     - On `remove`: remove entry from `data/mcp_servers.json` (only for dynamic servers; static servers are only
@@ -139,23 +143,30 @@ core ──→ provider      (unchanged)
 
 ### 4.4 Bootstrap Changes (`apps/bot/core/handler.py`)
 
-- **Responsibility**: Extended to create MCPManager, load configs, connect servers, inject into tool and mention handler
+- **Responsibility**: Extended to create MCPManager, load configs, connect servers, inject into tool and mention
+  handler, and run hot-reload loop
 - **Changes**:
     - After `db.init()`, create `MCPManager` instance
     - Load static config from `apps/bot/config/mcp.json` (optional file)
     - Load dynamic config from `data/mcp_servers.json` (optional file, under DATABASE_PATH parent)
-    - Merge configs (dynamic overrides static for same name)
-    - Connect to all configured servers (failures logged, not fatal)
-    - After `scan_tools()`, inject `mcp_manager` into the mcp_server tool
-    - Define `rebuild_tools()` callback that re-merges native + MCP tools and updates `provider.tools`
+  - Merge configs (dynamic overrides static for same name, log warning on overlap)
+  - Filter by `enabled` field — only connect servers with `enabled: true` (default true for backward compat)
+  - Connect to enabled servers (failures logged, not fatal)
+  - After `scan_tools()`, inject `mcp_manager` and `_dynamic_config_path` into the mcp_server tool
+  - Define `rebuild_tools()` callback that re-merges native + MCP tools and updates `provider.tools` + `tool_hints`
     - Inject `_rebuild_tools` callback into the mcp_server tool
     - Call `rebuild_tools()` once initially to set up the merged tool list
+  - Start `_mcp_reload_loop()` as background asyncio task
     - On shutdown (finally block), call `mcp_manager.disconnect_all()`
-- **New helper in handler.py**:
-    ```python
-    def _load_mcp_config(path: str) -> dict:
-        """Load MCP config from JSON file. Returns empty dict on missing/invalid file."""
-    ```
+- **Hot-reload loop** (`_mcp_reload_loop`):
+    - Background task running every 30 seconds
+    - Re-reads both static and dynamic config files
+    - Computes diff: newly enabled → connect, disabled/removed → disconnect, config changed → reconnect
+    - Uses `_server_config_changed()` to compare command/args/env/timeout fields
+    - Calls `rebuild_tools()` after any changes
+- **New helpers in handler.py**:
+    - `_get_enabled_servers(servers)` — filter config dict to enabled servers only
+    - `_server_config_changed(old, new)` — compare meaningful config fields
 
 ### 4.5 Loader Changes (`apps/bot/core/loader.py`)
 
@@ -183,12 +194,14 @@ core ──→ provider      (unchanged)
 
 ### 4.7 Config File (`apps/bot/config/mcp.json`)
 
-- **Responsibility**: Static MCP server configuration
-- **Format**: Standard MCP config convention
+- **Responsibility**: Static MCP server configuration. Pre-configured with 55 popular MCP servers, all disabled by
+  default.
+- **Format**: Standard MCP config convention with `enabled` field
     ```json
     {
       "mcpServers": {
         "server_name": {
+          "enabled": false,
           "command": "npx",
           "args": ["-y", "@modelcontextprotocol/server-xxx", "/path"],
           "env": {},
@@ -197,6 +210,9 @@ core ──→ provider      (unchanged)
       }
     }
     ```
+- **`enabled` field**: `true` = connect, `false` = skip. Defaults to `true` if omitted (backward compatibility).
+- **Management**: To enable/disable a server, edit the `enabled` field directly. The hot-reload loop (4.4) detects
+  changes within 30 seconds and connects/disconnects automatically.
 - **Behavior**: Optional file. If missing or empty, bot starts normally with no MCP servers.
 - **Location**: Alongside other config files in `apps/bot/config/`
 
@@ -206,12 +222,13 @@ core ──→ provider      (unchanged)
 
 Top-level object with `mcpServers` key. Each server entry:
 
-| Field     | Type         | Description                                        |
-|:----------|:-------------|:---------------------------------------------------|
-| `command` | string       | Executable to spawn (e.g., "npx", "python")        |
-| `args`    | list[string] | Command arguments                                  |
-| `env`     | object       | Environment variables for the process              |
-| `timeout` | int          | Connection timeout in milliseconds (default 30000) |
+| Field     | Type         | Description                                                     |
+|:----------|:-------------|:----------------------------------------------------------------|
+| `enabled` | bool         | Whether to connect this server (`true`/`false`, default `true`) |
+| `command` | string       | Executable to spawn (e.g., "npx", "python")                     |
+| `args`    | list[string] | Command arguments                                               |
+| `env`     | object       | Environment variables for the process                           |
+| `timeout` | int          | Connection timeout in milliseconds (default 30000)              |
 
 ### Dynamic Config: `data/mcp_servers.json`
 
@@ -370,6 +387,7 @@ User: "disconnect the filesystem server"
 
 ## 10. Change Log
 
-| Version | Date       | Changes         | Affected Scope | Reason |
-|:--------|:-----------|:----------------|:---------------|:-------|
-| v1      | 2026-03-10 | Initial version | ALL            | -      |
+| Version | Date       | Changes                                                                                                         | Affected Scope           | Reason                                                                            |
+|:--------|:-----------|:----------------------------------------------------------------------------------------------------------------|:-------------------------|:----------------------------------------------------------------------------------|
+| v1      | 2026-03-10 | Initial version                                                                                                 | ALL                      | -                                                                                 |
+| v2      | 2026-03-10 | Add hot-reload loop to 4.4; add `enabled` field to 4.7 and data model; clarify 4.3 only manages dynamic servers | Section 4.3, 4.4, 4.7, 5 | Separation of concerns: file editing for static servers, tool for dynamic servers |

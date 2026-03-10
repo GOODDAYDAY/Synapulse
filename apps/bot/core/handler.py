@@ -22,6 +22,93 @@ logger = logging.getLogger("synapulse.core")
 # Config file paths
 _STATIC_MCP_CONFIG = Path(__file__).resolve().parent.parent / "config" / "mcp.json"
 
+# How often to check mcp.json for changes (seconds)
+_MCP_RELOAD_INTERVAL = 30
+
+
+def _get_enabled_servers(servers: dict) -> dict:
+    """Filter server configs to only those with enabled=True (default True for backward compat)."""
+    return {
+        name: cfg for name, cfg in servers.items()
+        if cfg.get("enabled", True) and name != "_comment"
+    }
+
+
+def _server_config_changed(old: dict, new: dict) -> bool:
+    """Check if the meaningful parts of a server config have changed."""
+    keys = ("command", "args", "env", "timeout")
+    for k in keys:
+        if old.get(k) != new.get(k):
+            return True
+    return False
+
+
+async def _mcp_reload_loop(
+        mcp_manager: MCPManager,
+        static_config_path: str,
+        dynamic_config_path: str,
+        native_tool_names: set[str],
+        rebuild_tools,
+) -> None:
+    """Background task: periodically re-read MCP configs and apply changes.
+
+    Detects three types of changes:
+    - New enabled servers → connect
+    - Removed or disabled servers → disconnect
+    - Config changed for existing server → reconnect
+    """
+    while True:
+        await asyncio.sleep(_MCP_RELOAD_INTERVAL)
+        try:
+            static = load_mcp_config(static_config_path)
+            dynamic = load_mcp_config(dynamic_config_path)
+            merged = {**static, **dynamic}
+            desired = _get_enabled_servers(merged)
+
+            # Current state
+            current_names = {s["name"] for s in mcp_manager.list_servers()}
+            desired_names = set(desired.keys())
+
+            # Servers to disconnect (removed or disabled)
+            to_remove = current_names - desired_names
+            # Servers to connect (newly enabled)
+            to_add = desired_names - current_names
+            # Servers that may have changed config
+            to_check = current_names & desired_names
+
+            for name in to_check:
+                entry = mcp_manager._servers.get(name)
+                if entry and _server_config_changed(entry.config, desired[name]):
+                    to_remove.add(name)
+                    to_add.add(name)
+
+            if not to_remove and not to_add:
+                continue
+
+            changed = False
+            for name in to_remove:
+                logger.info("MCP hot-reload: disconnecting '%s'", name)
+                await mcp_manager.disconnect(name)
+                changed = True
+
+            for name in to_add:
+                source = "dynamic" if name in dynamic else "static"
+                try:
+                    logger.info("MCP hot-reload: connecting '%s'", name)
+                    await mcp_manager.connect(
+                        name, desired[name], source=source, native_tool_names=native_tool_names,
+                    )
+                    changed = True
+                except Exception:
+                    logger.exception("MCP hot-reload: failed to connect '%s'", name)
+
+            if changed:
+                rebuild_tools()
+                logger.info("MCP hot-reload: applied changes (+%d -%d)", len(to_add), len(to_remove))
+
+        except Exception:
+            logger.exception("MCP hot-reload check failed")
+
 
 async def start() -> None:
     """Bootstrap the bot: config → db → provider → tools → MCP → channel + jobs + reminders."""
@@ -49,9 +136,10 @@ async def start() -> None:
     # --- MCP setup ---
     mcp_manager = MCPManager()
     dynamic_config_path = str(Path(config.DATABASE_PATH).parent / "mcp_servers.json")
+    static_config_path = str(_STATIC_MCP_CONFIG)
 
     # Load static + dynamic MCP configs
-    static_servers = load_mcp_config(str(_STATIC_MCP_CONFIG))
+    static_servers = load_mcp_config(static_config_path)
     dynamic_servers = load_mcp_config(dynamic_config_path)
 
     # Merge: dynamic overrides static for same name
@@ -60,14 +148,17 @@ async def start() -> None:
         logger.warning("MCP server '%s' defined in both static and dynamic config, dynamic takes precedence", name)
     merged_servers = {**static_servers, **dynamic_servers}
 
-    # Connect to all configured MCP servers
+    # Connect to enabled MCP servers
     native_tool_names = set(tools.keys())
-    for server_name, server_config in merged_servers.items():
+    enabled_servers = _get_enabled_servers(merged_servers)
+    for server_name, server_config in enabled_servers.items():
         source = "dynamic" if server_name in dynamic_servers else "static"
         try:
             await mcp_manager.connect(server_name, server_config, source=source, native_tool_names=native_tool_names)
         except Exception:
             logger.exception("MCP server '%s' failed to connect, skipping", server_name)
+    if merged_servers:
+        logger.info("MCP config: %d server(s) defined, %d enabled", len(merged_servers), len(enabled_servers))
 
     # Inject MCP manager into mcp_server tool
     mcp_tool = tools.get("mcp_server")
@@ -127,6 +218,13 @@ async def start() -> None:
         # Start reminder checker (background task polling for due reminders)
         asyncio.create_task(start_reminder_checker(db, channel.send))
         logger.info("Reminder checker started")
+
+        # Start MCP config hot-reload watcher
+        asyncio.create_task(_mcp_reload_loop(
+            mcp_manager, static_config_path, dynamic_config_path,
+            native_tool_names, rebuild_tools,
+        ))
+        logger.info("MCP hot-reload watcher started (interval=%ds)", _MCP_RELOAD_INTERVAL)
 
         # Start all discovered jobs (each job self-manages enabled/disabled via jobs.json)
         if jobs:
