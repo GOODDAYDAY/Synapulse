@@ -69,8 +69,9 @@ class Channel(BaseChannel):
             history.reverse()
 
             # Delegate to core via callback
+            channel_id = str(message.channel.id)
             async with message.channel.typing():
-                reply = await on_mention(content, history)
+                reply = await on_mention(content, channel_id, history)
 
             await self._send_chunks(message.channel, reply)
 
@@ -87,6 +88,12 @@ class Channel(BaseChannel):
         ch = self._bot.get_channel(int(channel_id))
         if ch:
             await self._send_chunks(ch, message)
+
+    async def send_file(self, channel_id: str, file_path: str, comment: str = "") -> None:
+        """Send a file to a Discord channel by ID."""
+        ch = self._bot.get_channel(int(channel_id))
+        if ch:
+            await ch.send(content=comment or None, file=discord.File(file_path))
 
     @staticmethod
     async def _send_chunks(channel: discord.abc.Messageable, text: str) -> None:

@@ -6,6 +6,11 @@ A tool inherits from one or more format mixins to declare which LLM APIs it supp
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Coroutine
+from typing import Any, TypeAlias
+
+# Callback type: (file_path, comment) -> None
+SendFileCallback: TypeAlias = Callable[[str, str], Coroutine[Any, Any, None]]
 
 
 class BaseTool(ABC):
@@ -15,6 +20,7 @@ class BaseTool(ABC):
     description: str
     parameters: dict  # JSON Schema
     usage_hint: str = ""  # Short routing hint for system prompt (falls back to description)
+    send_file: SendFileCallback | None = None  # Injected by core per-message
 
     def validate(self) -> None:
         """Override to validate tool-specific config (e.g. API keys)."""

@@ -4,9 +4,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Coroutine
 from typing import Any, TypeAlias
 
-# Callback type: (content, history) -> reply
+# Callback type: (content, channel_id, history) -> reply
 MentionHandler: TypeAlias = Callable[
-    [str, list[dict[str, str]] | None],
+    [str, str, list[dict[str, str]] | None],
     Coroutine[Any, Any, str],
 ]
 
@@ -27,3 +27,7 @@ class BaseChannel(ABC):
     @abstractmethod
     async def send(self, channel_id: str, message: str) -> None:
         """Send a message to the given channel."""
+
+    @abstractmethod
+    async def send_file(self, channel_id: str, file_path: str, comment: str = "") -> None:
+        """Send a file to the given channel."""

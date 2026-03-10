@@ -48,7 +48,7 @@ async def start() -> None:
 
     # Core owns the event loop: channel task + job tasks
     channel_task = asyncio.create_task(
-        channel.run(on_mention=make_mention_handler(provider, tools))
+        channel.run(on_mention=make_mention_handler(provider, tools, channel.send_file))
     )
     await channel.wait_until_ready()
 

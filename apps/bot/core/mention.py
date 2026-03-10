@@ -9,6 +9,7 @@ MAX_TOOL_ROUNDS. A 1-second pause between rounds prevents API rate limiting.
 import asyncio
 import logging
 from collections.abc import Callable, Coroutine
+from functools import partial
 from typing import Any
 
 import jsonschema
@@ -25,11 +26,15 @@ _LOG_RESULT_MAX = 200
 # Compress consumed tool results longer than this to save tokens on subsequent rounds.
 _COMPRESS_THRESHOLD = 200
 
+# Type for the raw channel send_file callback: (channel_id, file_path, comment) -> None
+_ChannelSendFile = Callable[[str, str, str], Coroutine[Any, Any, None]]
+
 
 def make_mention_handler(
         provider: BaseProvider,
         tools: dict,
-) -> Callable[[str, list[dict[str, str]] | None], Coroutine[Any, Any, str]]:
+        send_file: _ChannelSendFile | None = None,
+) -> Callable[[str, str, list[dict[str, str]] | None], Coroutine[Any, Any, str]]:
     """Create a handle_mention callback with provider and tools closed over."""
 
     # Build system prompt once — base identity + dynamic tool hints (if any).
@@ -41,6 +46,7 @@ def make_mention_handler(
 
     async def handle_mention(
             content: str,
+            channel_id: str = "",
             history: list[dict[str, str]] | None = None,
     ) -> str:
         """Process an @mention: build context, call provider, orchestrate tool-call loop.
@@ -49,15 +55,22 @@ def make_mention_handler(
         user-visible messages so the channel never gets an unhandled exception.
         """
         try:
-            return await _handle_mention_inner(content, history)
+            return await _handle_mention_inner(content, channel_id, history)
         except Exception:
             logger.exception("Unhandled error in mention handler")
             return "Something went wrong while processing your request. Please try again later."
 
     async def _handle_mention_inner(
             content: str,
+            channel_id: str = "",
             history: list[dict[str, str]] | None = None,
     ) -> str:
+        # Inject scoped send_file callback into tools for this message
+        if send_file and channel_id:
+            scoped = partial(send_file, channel_id)
+            for tool in tools.values():
+                tool.send_file = scoped
+
         logger.info("Handling mention (length=%d, history=%d)", len(content), len(history or []))
         logger.info("Available tools: %s", list(tools.keys()) if tools else "(none)")
 

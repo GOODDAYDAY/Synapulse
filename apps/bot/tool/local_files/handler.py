@@ -30,23 +30,24 @@ class Tool(OpenAITool, AnthropicTool):
         "Access local files. "
         "Use search to find files by name across directories (one call). "
         "Use list_dir to browse one directory at a time.\n"
-        "Actions: search, list_dir, read_file, file_info."
+        "Actions: search, list_dir, read_file, file_info, send_file."
     )
     usage_hint = (
         "Files and directories — use search to find files by name, "
-        "list_dir to browse, read_file to read content."
+        "list_dir to browse, read_file to read content, send_file to send as attachment."
     )
     parameters = {
         "type": "object",
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["search", "list_dir", "read_file", "file_info"],
+                "enum": ["search", "list_dir", "read_file", "file_info", "send_file"],
                 "description": (
                     "search: find files/dirs by name recursively (use query param); "
                     "list_dir: list one directory; "
                     "read_file: read text file; "
-                    "file_info: metadata"
+                    "file_info: metadata; "
+                    "send_file: send file as attachment to the user"
                 ),
             },
             "path": {
@@ -56,6 +57,10 @@ class Tool(OpenAITool, AnthropicTool):
             "query": {
                 "type": "string",
                 "description": "Search term for file/directory name (required for search action)",
+            },
+            "comment": {
+                "type": "string",
+                "description": "Optional comment when sending a file (used with send_file action)",
             },
         },
         "required": ["action", "path"],
@@ -87,7 +92,7 @@ class Tool(OpenAITool, AnthropicTool):
                 continue
         return False
 
-    async def execute(self, action: str, path: str, query: str = "") -> str:
+    async def execute(self, action: str, path: str, query: str = "", comment: str = "") -> str:
         target = Path(path)
 
         if not self._is_allowed(target):
@@ -101,6 +106,8 @@ class Tool(OpenAITool, AnthropicTool):
             return self._read_file(target)
         if action == "file_info":
             return self._file_info(target)
+        if action == "send_file":
+            return await self._send_file(target, comment)
 
         return f"Error: unknown action '{action}'"
 
@@ -180,6 +187,14 @@ class Tool(OpenAITool, AnthropicTool):
         if len(text) > MAX_READ_CHARS:
             return text[:MAX_READ_CHARS] + f"\n\n... (truncated, {len(text)} total characters)"
         return text
+
+    async def _send_file(self, path: Path, comment: str) -> str:
+        if not path.is_file():
+            return f"Error: '{path}' is not a file"
+        if not self.send_file:
+            return "Error: file sending is not available in this channel"
+        await self.send_file(str(path), comment)
+        return f"File sent: {path.name}"
 
     def _file_info(self, path: Path) -> str:
         if not path.exists():
