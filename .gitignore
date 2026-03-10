@@ -213,3 +213,4 @@ __marimo__/
 
 # config
 /apps/bot/config/jobs.json
+/apps/bot/config/logs/
