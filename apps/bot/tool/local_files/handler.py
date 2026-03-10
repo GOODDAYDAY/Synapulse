@@ -1,4 +1,4 @@
-"""Local file browser — read-only access to allowed directories.
+"""Local file access — read and write within allowed directories.
 
 Design principle: code does traversal (mechanical), AI does matching (decision).
 - list_dir: one level at a time — AI decides where to drill down next.
@@ -17,6 +17,7 @@ from apps.bot.tool.base import AnthropicTool, OpenAITool
 logger = logging.getLogger("synapulse.tool.local_files")
 
 MAX_READ_CHARS = 10000
+MAX_WRITE_BYTES = 102400  # 100KB per write
 MAX_LIST_ENTRIES = 100
 MAX_SEARCH_RESULTS = 50
 
@@ -27,27 +28,34 @@ _SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".tox", ".
 class Tool(OpenAITool, AnthropicTool):
     name = "local_files"
     description = (
-        "Access local files. "
-        "Use search to find files by name across directories (one call). "
-        "Use list_dir to browse one directory at a time.\n"
-        "Actions: search, list_dir, read_file, file_info, send_file."
+        "Access and manage local files. "
+        "Read: search, list_dir, read_file, file_info, send_file. "
+        "Write: write_file (create/overwrite), append_file (append), mkdir (create directory).\n"
+        "All operations are restricted to allowed directories."
     )
     usage_hint = (
-        "Files and directories — use search to find files by name, "
-        "list_dir to browse, read_file to read content, send_file to send as attachment."
+        "Files and directories — search to find, list_dir to browse, "
+        "read_file to read, write_file to create/overwrite, append_file to append, "
+        "mkdir to create directories, send_file to send as attachment."
     )
     parameters = {
         "type": "object",
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["search", "list_dir", "read_file", "file_info", "send_file"],
+                "enum": [
+                    "search", "list_dir", "read_file", "file_info", "send_file",
+                    "write_file", "append_file", "mkdir",
+                ],
                 "description": (
                     "search: find files/dirs by name recursively (use query param); "
                     "list_dir: list one directory; "
                     "read_file: read text file; "
                     "file_info: metadata; "
-                    "send_file: send file as attachment to the user"
+                    "send_file: send file as attachment; "
+                    "write_file: create or overwrite a file (use content param); "
+                    "append_file: append to a file (use content param); "
+                    "mkdir: create directory (including parents)"
                 ),
             },
             "path": {
@@ -57,6 +65,10 @@ class Tool(OpenAITool, AnthropicTool):
             "query": {
                 "type": "string",
                 "description": "Search term for file/directory name (required for search action)",
+            },
+            "content": {
+                "type": "string",
+                "description": "Text content to write (required for write_file, append_file)",
             },
             "comment": {
                 "type": "string",
@@ -92,7 +104,7 @@ class Tool(OpenAITool, AnthropicTool):
                 continue
         return False
 
-    async def execute(self, action: str, path: str, query: str = "", comment: str = "") -> str:
+    async def execute(self, action: str, path: str, query: str = "", content: str = "", comment: str = "") -> str:
         target = Path(path)
 
         if not self._is_allowed(target):
@@ -108,6 +120,12 @@ class Tool(OpenAITool, AnthropicTool):
             return self._file_info(target)
         if action == "send_file":
             return await self._send_file(target, comment)
+        if action == "write_file":
+            return self._write_file(target, content)
+        if action == "append_file":
+            return self._append_file(target, content)
+        if action == "mkdir":
+            return self._mkdir(target)
 
         return f"Error: unknown action '{action}'"
 
@@ -208,3 +226,52 @@ class Tool(OpenAITool, AnthropicTool):
         kind = "directory" if path.is_dir() else "file"
         modified = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
         return f"type: {kind}\nsize: {stat.st_size} bytes\nmodified: {modified}"
+
+    # --- Write operations ---
+
+    def _write_file(self, path: Path, content: str) -> str:
+        """Create or overwrite a file with text content. Auto-creates parent dirs."""
+        size = len(content.encode("utf-8"))
+        if size > MAX_WRITE_BYTES:
+            return f"Error: content too large ({size} bytes, max {MAX_WRITE_BYTES})"
+
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        except PermissionError:
+            return f"Error: permission denied for '{path}'"
+        except OSError as e:
+            return f"Error: failed to write file — {e}"
+
+        logger.info("File written: %s (%d bytes)", path, size)
+        return f"File written: {path.name} ({size} bytes)"
+
+    def _append_file(self, path: Path, content: str) -> str:
+        """Append content to a file. Creates the file if it doesn't exist."""
+        size = len(content.encode("utf-8"))
+        if size > MAX_WRITE_BYTES:
+            return f"Error: content too large ({size} bytes, max {MAX_WRITE_BYTES})"
+
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(content)
+        except PermissionError:
+            return f"Error: permission denied for '{path}'"
+        except OSError as e:
+            return f"Error: failed to append to file — {e}"
+
+        logger.info("Content appended: %s (%d bytes)", path, size)
+        return f"Content appended to {path.name} ({size} bytes)"
+
+    def _mkdir(self, path: Path) -> str:
+        """Create a directory including intermediate directories."""
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            return f"Error: permission denied for '{path}'"
+        except OSError as e:
+            return f"Error: failed to create directory — {e}"
+
+        logger.info("Directory created: %s", path)
+        return f"Directory created: {path}"

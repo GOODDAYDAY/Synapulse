@@ -5,6 +5,7 @@ import importlib
 import logging
 from pathlib import Path
 
+from apps.bot.config.models import build_legacy_endpoint, load_models_config
 from apps.bot.config.settings import config
 from apps.bot.core.loader import (
     merge_tool_hints,
@@ -16,14 +17,18 @@ from apps.bot.core.mention import make_mention_handler
 from apps.bot.core.reminder import start_reminder_checker
 from apps.bot.mcp.client import MCPManager, load_mcp_config
 from apps.bot.memory.database import Database
+from apps.bot.provider.base import OpenAIProvider
+from apps.bot.provider.endpoint import EndpointPool
 
 logger = logging.getLogger("synapulse.core")
 
 # Config file paths
 _STATIC_MCP_CONFIG = Path(__file__).resolve().parent.parent / "config" / "mcp.json"
+_MODELS_CONFIG = Path(__file__).resolve().parent.parent / "config" / "models.yaml"
 
-# How often to check mcp.json for changes (seconds)
+# How often to check config files for changes (seconds)
 _MCP_RELOAD_INTERVAL = 30
+_MODELS_RELOAD_INTERVAL = 30
 
 
 def _get_enabled_servers(servers: dict) -> dict:
@@ -110,6 +115,37 @@ async def _mcp_reload_loop(
             logger.exception("MCP hot-reload check failed")
 
 
+def _get_mtime(path: str) -> float:
+    """Get file modification time, or 0.0 if file doesn't exist."""
+    try:
+        return Path(path).stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+async def _models_reload_loop(pool: EndpointPool, config_path: str) -> None:
+    """Background task: periodically re-read models.yaml and update pool."""
+    last_mtime = _get_mtime(config_path)
+    while True:
+        await asyncio.sleep(_MODELS_RELOAD_INTERVAL)
+        try:
+            current_mtime = _get_mtime(config_path)
+            if current_mtime == last_mtime:
+                continue
+            last_mtime = current_mtime
+
+            new_endpoints = load_models_config(config_path)
+            pool.update(new_endpoints)
+            logger.info(
+                "Models config reloaded: %d endpoints, tags: %s",
+                pool.endpoint_count, pool.get_tag_summary(),
+            )
+        except FileNotFoundError:
+            logger.warning("models.yaml deleted, keeping current config")
+        except Exception:
+            logger.exception("Models config reload failed, keeping current config")
+
+
 async def start() -> None:
     """Bootstrap the bot: config → db → provider → tools → MCP → channel + jobs + reminders."""
     config.log_summary()
@@ -118,11 +154,35 @@ async def start() -> None:
     db = Database()
     await db.init(config.DATABASE_PATH)
 
-    # Init provider — authenticate() handles its own validation
-    provider_module = importlib.import_module(f"apps.bot.provider.{config.AI_PROVIDER}.chat")
-    provider = provider_module.Provider()
-    provider.authenticate()
-    logger.info("AI provider ready: %s", config.AI_PROVIDER)
+    # Init provider — load from models.yaml or fall back to legacy .env config
+    models_path = str(_MODELS_CONFIG)
+    pool: EndpointPool | None = None
+
+    if _MODELS_CONFIG.is_file():
+        endpoints = load_models_config(models_path)
+        pool = EndpointPool(endpoints)
+        logger.info("Model endpoints loaded from models.yaml")
+    else:
+        # Backward compat: build from legacy AI_PROVIDER + AI_MODEL
+        endpoints = build_legacy_endpoint(config.AI_PROVIDER, config.AI_MODEL)
+        if endpoints:
+            pool = EndpointPool(endpoints)
+            logger.info("No models.yaml, using legacy config: %s/%s", config.AI_PROVIDER, config.AI_MODEL)
+
+    if config.AI_PROVIDER == "mock" and not pool:
+        # Mock provider — no pool needed, import directly
+        provider_module = importlib.import_module("apps.bot.provider.mock.chat")
+        provider = provider_module.Provider()
+        logger.info("AI provider ready: mock")
+    elif pool:
+        # Use OpenAI provider with endpoint pool (covers copilot, ollama, and any YAML endpoints)
+        provider = OpenAIProvider()
+        provider._pool = pool
+        logger.info("AI provider ready: OpenAI-compatible with %d endpoint(s)", pool.endpoint_count)
+    else:
+        raise RuntimeError(
+            "No AI configuration found. Provide config/models.yaml or set AI_PROVIDER in .env"
+        )
 
     # Scan tools, inject db
     tools = scan_tools()
@@ -201,7 +261,8 @@ async def start() -> None:
     channel_module = importlib.import_module(f"apps.bot.channel.{config.CHANNEL_TYPE}.client")
     channel = channel_module.Channel()
     channel.validate()
-    logger.info("Starting with channel=%s, ai=%s", config.CHANNEL_TYPE, config.AI_PROVIDER)
+    provider_desc = f"pool({pool.endpoint_count})" if pool else config.AI_PROVIDER
+    logger.info("Starting with channel=%s, ai=%s", config.CHANNEL_TYPE, provider_desc)
 
     # Core owns the event loop: channel task + job tasks + reminder checker
     try:
@@ -225,6 +286,11 @@ async def start() -> None:
             native_tool_names, rebuild_tools,
         ))
         logger.info("MCP hot-reload watcher started (interval=%ds)", _MCP_RELOAD_INTERVAL)
+
+        # Start models.yaml hot-reload watcher
+        if pool and _MODELS_CONFIG.is_file():
+            asyncio.create_task(_models_reload_loop(pool, models_path))
+            logger.info("Models hot-reload watcher started (interval=%ds)", _MODELS_RELOAD_INTERVAL)
 
         # Start all discovered jobs (each job self-manages enabled/disabled via jobs.json)
         if jobs:

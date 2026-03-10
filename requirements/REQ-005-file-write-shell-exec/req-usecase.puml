@@ -1,0 +1,45 @@
+@startuml
+title REQ-005 File Write & Shell Execution - Use Cases
+
+actor User
+actor AI as "AI Agent"
+
+rectangle "local_files (extended)" {
+  usecase "Write File" as WF
+  usecase "Append File" as AF
+  usecase "Create Directory" as MD
+  usecase "Read File" as RF #LightGray
+  usecase "List Directory" as LD #LightGray
+}
+
+rectangle "shell_exec (new)" {
+  usecase "Execute Command" as EC
+  usecase "Blacklist Check" as BC
+}
+
+User --> AI : @mention request
+AI --> WF : write_file(path, content)
+AI --> AF : append_file(path, content)
+AI --> MD : mkdir(path)
+AI --> RF : read_file(path)
+AI --> LD : list_dir(path)
+AI --> EC : execute(command, working_dir, timeout)
+
+WF --> (Path Whitelist Check) : validates
+AF --> (Path Whitelist Check) : validates
+MD --> (Path Whitelist Check) : validates
+EC --> BC : pre-execution
+
+note right of BC
+  Dangerous command patterns:
+  rm -rf /, mkfs, format,
+  shutdown, reboot, dd if=,
+  fork bombs
+end note
+
+note right of WF
+  Max 100KB per write
+  UTF-8 encoding
+  Auto-create parent dirs
+end note
+@enduml

@@ -1,0 +1,37 @@
+@startuml
+title REQ-006 Multi-Model Rotation - Use Cases
+
+actor "Bot Owner" as owner
+actor "Discord User" as user
+actor "AI Endpoint" as endpoint
+
+rectangle "Synapulse Model Rotation" {
+  usecase "Configure models.yaml" as UC1
+  usecase "Hot-reload config changes" as UC2
+  usecase "Enable/Disable endpoint" as UC3
+  usecase "Send AI request with tag" as UC4
+  usecase "Filter endpoints by tag" as UC5
+  usecase "Round-robin rotation" as UC6
+  usecase "Detect rate limit (429)" as UC7
+  usecase "Auto-fallback to next" as UC8
+  usecase "Cooldown management" as UC9
+  usecase "Fallback to legacy config" as UC10
+}
+
+owner --> UC1
+owner --> UC3
+user --> UC4
+
+UC1 ..> UC2 : <<triggers>>
+UC3 ..> UC2 : <<triggers>>
+UC4 --> UC5
+UC5 --> UC6
+UC6 --> endpoint
+UC6 ..> UC7 : <<on failure>>
+UC7 --> UC8
+UC8 --> UC9
+UC8 --> UC6 : try next
+
+UC1 ..> UC10 : <<if missing>>
+
+@enduml

@@ -1,14 +1,21 @@
 """Base classes for all AI provider implementations.
 
 BaseProvider defines the core contract (authenticate, chat).
-Format classes (OpenAIProvider, AnthropicProvider, ...) add message formatting.
+Format classes (OpenAIProvider, AnthropicProvider) add message formatting
+and rotation-aware chat() with automatic endpoint failover.
+
 A concrete provider inherits from the format class matching its API.
+Mock provider overrides chat() to skip HTTP entirely.
 """
 
 import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+
+from apps.bot.config.models import EndpointConfig
+from apps.bot.provider.endpoint import EndpointPool
+from apps.bot.provider.errors import EndpointError, RateLimitError
 
 logger = logging.getLogger("synapulse.provider")
 
@@ -35,6 +42,8 @@ class BaseProvider(ABC):
 
     def __init__(self) -> None:
         self._tools: list[dict] = []
+        self._pool: EndpointPool | None = None
+        self._default_tag: str = "default"
 
     @property
     def tools(self) -> list[dict]:
@@ -71,16 +80,23 @@ class BaseProvider(ABC):
         """
 
     @abstractmethod
-    async def chat(self, messages: list, tool_choice: str | None = None) -> ChatResponse:
-        """Send messages to AI. Appends assistant response to messages. Returns parsed response.
+    async def chat(self, messages: list, tool_choice: str | None = None,
+                   tag: str | None = None) -> ChatResponse:
+        """Send messages to AI with automatic endpoint rotation.
 
-        tool_choice: optional hint passed to the API (e.g. "auto", "required", "none").
-        Only takes effect when tools are loaded. Default None means provider default.
+        tag: which endpoint group to use. Defaults to self._default_tag.
+        tool_choice: optional hint ("auto", "required", "none").
+        Appends assistant response to messages. Returns parsed response.
         """
 
 
 class OpenAIProvider(BaseProvider):
-    """Provider format for OpenAI-compatible APIs (GitHub Models, Azure OpenAI, etc.)."""
+    """Provider format for OpenAI-compatible APIs with rotation support.
+
+    When an EndpointPool is injected, chat() automatically rotates through
+    available endpoints on failure. Without a pool, subclasses (like mock)
+    override chat() directly.
+    """
 
     api_format = "openai"
 
@@ -117,6 +133,94 @@ class OpenAIProvider(BaseProvider):
             if len(content) > threshold:
                 logger.debug("Compressing tool result: %d chars", len(content))
                 msg["content"] = f"[Compressed result: {len(content)} chars]"
+
+    async def chat(self, messages: list, tool_choice: str | None = None,
+                   tag: str | None = None) -> ChatResponse:
+        """Send messages with automatic endpoint rotation on failure."""
+        if not self._pool:
+            # No pool — subclass should override (e.g., mock provider)
+            return ChatResponse(text="[AI Error] No endpoint pool configured")
+
+        effective_tag = tag or self._default_tag
+        endpoints = self._pool.get_available(effective_tag)
+        if not endpoints:
+            logger.error("No available endpoints for tag '%s'", effective_tag)
+            return ChatResponse(text=f"[AI Error] No available endpoints for tag '{effective_tag}'")
+
+        last_error: Exception | None = None
+        for endpoint in endpoints:
+            try:
+                return await self._http_chat(endpoint, messages, tool_choice)
+            except RateLimitError as e:
+                logger.warning(
+                    "Endpoint '%s' rate limited (cooldown %.0fs), trying next",
+                    endpoint.name, e.retry_after,
+                )
+                self._pool.mark_cooldown(endpoint.name, e.retry_after)
+                last_error = e
+            except EndpointError as e:
+                logger.warning(
+                    "Endpoint '%s' error (HTTP %d), trying next",
+                    endpoint.name, e.status,
+                )
+                last_error = e
+            except Exception as e:
+                logger.warning(
+                    "Endpoint '%s' unexpected error: %s, trying next",
+                    endpoint.name, e,
+                )
+                last_error = e
+
+        # All endpoints failed — advance cursor so next request starts from a different one
+        self._pool.advance_cursor(effective_tag)
+        logger.error("All endpoints failed for tag '%s': %s", effective_tag, last_error)
+        return ChatResponse(text=f"[AI Error] All endpoints failed: {last_error}")
+
+    async def _http_chat(self, endpoint: EndpointConfig, messages: list,
+                         tool_choice: str | None) -> ChatResponse:
+        """Execute a single HTTP chat request to one OpenAI-compatible endpoint.
+
+        Raises RateLimitError on 429, EndpointError on other non-200 status.
+        On success, appends assistant message to messages list and returns parsed response.
+        """
+        import aiohttp
+
+        headers = {"Content-Type": "application/json"}
+        if endpoint.api_key:
+            headers["Authorization"] = f"Bearer {endpoint.api_key}"
+
+        payload: dict = {"model": endpoint.model, "messages": messages}
+        if self.tools:
+            payload["tools"] = self.tools
+            if tool_choice:
+                payload["tool_choice"] = tool_choice
+
+        url = f"{endpoint.base_url}/chat/completions"
+        logger.debug("Chat request -> %s (model=%s, messages=%d)",
+                     endpoint.name, endpoint.model, len(messages))
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload) as resp:
+                if resp.status == 429:
+                    retry_after = float(resp.headers.get("Retry-After", "60"))
+                    raise RateLimitError(retry_after=retry_after)
+                if resp.status != 200:
+                    text = await resp.text()
+                    logger.error("Endpoint '%s' HTTP %d: %s", endpoint.name, resp.status, text[:200])
+                    raise EndpointError(resp.status, text[:200])
+                data = await resp.json()
+
+        msg = data["choices"][0]["message"]
+        messages.append(msg)
+
+        tool_calls = self.parse_tool_calls(msg)
+        if tool_calls:
+            logger.debug("AI requested %d tool call(s) via '%s'", len(tool_calls), endpoint.name)
+            return ChatResponse(tool_calls=tool_calls)
+
+        text = msg.get("content") or "..."
+        logger.debug("Chat response from '%s' (length=%d)", endpoint.name, len(text))
+        return ChatResponse(text=text)
 
 
 class AnthropicProvider(BaseProvider):
@@ -160,3 +264,12 @@ class AnthropicProvider(BaseProvider):
                 if isinstance(content, str) and len(content) > threshold:
                     logger.debug("Compressing tool result: %d chars", len(content))
                     block["content"] = f"[Compressed result: {len(content)} chars]"
+
+    async def chat(self, messages: list, tool_choice: str | None = None,
+                   tag: str | None = None) -> ChatResponse:
+        """Anthropic chat with rotation — same pattern as OpenAIProvider.
+
+        Deferred: _http_chat for Anthropic format is not yet implemented.
+        Will be added when an Anthropic endpoint is configured.
+        """
+        return ChatResponse(text="[AI Error] Anthropic provider chat not yet implemented")

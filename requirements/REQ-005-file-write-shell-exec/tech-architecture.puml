@@ -1,0 +1,52 @@
+@startuml
+title REQ-005 Module Architecture
+
+package "apps/bot/tool/local_files" {
+  [handler.py] as LF
+  note bottom of LF
+    MODIFIED:
+    + write_file(path, content)
+    + append_file(path, content)
+    + mkdir(path)
+    Reuses _is_allowed() for
+    all read + write ops
+  end note
+}
+
+package "apps/bot/tool/shell_exec" {
+  [handler.py] as SE
+  [safety.py] as SAF
+  SE --> SAF : is_blocked(command)
+  note bottom of SE
+    NEW:
+    execute(command, working_dir, timeout)
+    async subprocess + output formatting
+  end note
+  note bottom of SAF
+    NEW:
+    Pure function, no side effects
+    Regex blacklist patterns
+    Directly importable for tests
+  end note
+}
+
+package "apps/bot/config" {
+  [settings.py] as CFG
+}
+
+package "apps/bot/core" {
+  [loader.py] as LOADER
+  [mention.py] as MENTION
+}
+
+LF ..> CFG : LOCAL_FILES_ALLOWED_PATHS
+SE ..> CFG : LOCAL_FILES_ALLOWED_PATHS\n(default working_dir)
+LOADER ..> LF : scan_tools() auto-discovers
+LOADER ..> SE : scan_tools() auto-discovers
+MENTION --> LF : tool-call dispatch
+MENTION --> SE : tool-call dispatch
+
+database "Filesystem" as FS
+LF --> FS : read + write
+SE --> FS : subprocess I/O
+@enduml

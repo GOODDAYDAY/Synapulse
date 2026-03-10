@@ -1,0 +1,43 @@
+# Multi-model endpoint configuration
+# Copy to models.yaml and customize for your setup.
+# Supports ${ENV_VAR} expansion for secrets.
+# Hot-reloaded every 30 seconds — changes take effect without restart.
+
+models:
+  # GitHub Models (Copilot) — large model
+  - name: github-gpt4o
+    protocol: openai
+    base_url: https://models.inference.ai.azure.com
+    api_key: ${GITHUB_TOKEN}
+    model: gpt-4o
+    tags: [large, default]
+    enabled: true
+    priority: 0
+
+  # GitHub Models (Copilot) — small model
+  - name: github-gpt4o-mini
+    protocol: openai
+    base_url: https://models.inference.ai.azure.com
+    api_key: ${GITHUB_TOKEN}
+    model: gpt-4o-mini
+    tags: [small]
+    enabled: true
+    priority: 0
+
+  # Local Ollama — large model (fallback)
+  - name: ollama-llama70b
+    protocol: openai
+    base_url: http://localhost:11434/v1
+    model: llama3.1:70b
+    tags: [large]
+    enabled: false
+    priority: 10
+
+  # Local Ollama — small model (fallback)
+  - name: ollama-llama8b
+    protocol: openai
+    base_url: http://localhost:11434/v1
+    model: llama3.1:8b
+    tags: [small]
+    enabled: false
+    priority: 10

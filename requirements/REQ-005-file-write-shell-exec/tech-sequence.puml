@@ -1,0 +1,36 @@
+@startuml
+title REQ-005 Shell Execution Sequence
+
+participant "AI Agent" as AI
+participant "mention.py" as CORE
+participant "shell_exec\nhandler.py" as TOOL
+participant "safety.py" as SAFE
+participant "subprocess" as PROC
+
+AI -> CORE : tool_call("shell_exec", {command, working_dir, timeout})
+CORE -> TOOL : execute(command, working_dir, timeout)
+
+TOOL -> TOOL : validate command not empty
+
+TOOL -> SAFE : is_blocked(command)
+alt command is blocked
+  SAFE --> TOOL : (True, "pattern description")
+  TOOL -> TOOL : log WARNING
+  TOOL --> CORE : "Error: command blocked..."
+  CORE --> AI : tool result (blocked)
+else command is safe
+  SAFE --> TOOL : (False, "")
+  TOOL -> TOOL : resolve working_dir, clamp timeout
+  TOOL -> PROC : create_subprocess_shell(command, cwd, stdout, stderr)
+  alt completes within timeout
+    PROC --> TOOL : stdout, stderr, returncode
+    TOOL -> TOOL : decode output, truncate if > 10000 chars
+    TOOL --> CORE : "exit_code: 0\n--- stdout ---\n..."
+    CORE --> AI : tool result (success)
+  else timeout exceeded
+    TOOL -> PROC : kill()
+    TOOL --> CORE : "Error: command timed out after Xs"
+    CORE --> AI : tool result (timeout)
+  end
+end
+@enduml

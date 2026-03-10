@@ -1,0 +1,43 @@
+@startuml
+title REQ-006 Request Rotation Flow
+
+start
+
+:Receive chat request with tag;
+
+:Filter enabled endpoints\nby tag + protocol;
+
+if (Any matching endpoints?) then (yes)
+  :Sort by priority;
+  :Start from current cursor position;
+else (no)
+  :Return "no endpoints for tag" error;
+  stop
+endif
+
+repeat
+  :Send request to current endpoint;
+
+  if (Success?) then (yes)
+    :Return response to caller;
+    stop
+  else (no)
+    if (Rate limit (429)?) then (yes)
+      :Read Retry-After header;
+      :Mark endpoint cooldown\n(default 60s);
+    else (no)
+      :Log WARNING\n(server error / network error);
+    endif
+
+    :Advance cursor to next\nnon-cooldown endpoint;
+
+    if (All endpoints exhausted?) then (yes)
+      :Return last error to user;
+      stop
+    endif
+  endif
+repeat while (more endpoints to try)
+
+stop
+
+@enduml

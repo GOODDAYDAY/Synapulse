@@ -1,0 +1,54 @@
+@startuml
+title REQ-006 Architecture — Multi-Model Rotation
+
+package "config/" {
+  [models.yaml] as yaml
+  [models.py] as models_loader
+  note right of models_loader
+    Load YAML
+    Validate schema
+    Expand ${ENV_VAR}
+  end note
+}
+
+package "provider/" {
+  [endpoint.py\nEndpointPool] as pool
+  [errors.py\nRateLimitError\nEndpointError] as errors
+  [base.py\nOpenAIProvider] as base
+
+  note right of pool
+    Round-robin cursor
+    Cooldown tracking
+    Tag-based filtering
+    asyncio.Lock
+  end note
+
+  package "mock/" {
+    [chat.py\nProvider] as mock
+  }
+}
+
+package "core/" {
+  [handler.py] as handler
+  [mention.py] as mention
+}
+
+yaml --> models_loader : read & parse
+models_loader --> pool : list[EndpointConfig]
+handler --> models_loader : startup load
+handler --> pool : inject into provider
+handler --> pool : hot-reload loop
+
+pool --> base : get_available(tag)
+base --> errors : raise on failure
+base ..> pool : mark_cooldown()
+
+mention --> base : provider.chat(messages)
+mock --|> base : overrides chat()
+
+note bottom of mention
+  Zero changes to mention.py
+  chat() signature backward compatible
+end note
+
+@enduml

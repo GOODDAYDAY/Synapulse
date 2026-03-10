@@ -1,0 +1,47 @@
+@startuml
+title REQ-005 Shell Execution Flow
+
+start
+
+:AI calls shell_exec(command, working_dir, timeout);
+
+if (command is empty?) then (yes)
+  :Return "Error: command is required";
+  stop
+endif
+
+:Run blacklist pattern matching\non full command string;
+
+if (matches dangerous pattern?) then (yes)
+  :Log WARNING with matched pattern;
+  :Return "Error: command blocked\nby safety policy";
+  stop
+endif
+
+:Resolve working_dir\n(default: first allowed path);
+
+:Create async subprocess\n(asyncio.create_subprocess_shell);
+
+:Wait for completion\nwith timeout;
+
+if (timed out?) then (yes)
+  :Kill process;
+  :Return "Error: command\ntimed out after Xs";
+  stop
+endif
+
+:Collect stdout + stderr;
+
+if (decode fails?) then (yes)
+  :Return "(binary output, N bytes)";
+  stop
+endif
+
+if (output > 10000 chars?) then (yes)
+  :Truncate with note;
+endif
+
+:Return formatted result\n(exit_code + stdout + stderr);
+
+stop
+@enduml

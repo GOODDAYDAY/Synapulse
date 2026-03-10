@@ -19,4 +19,9 @@ python -m py_compile apps/bot/config/settings.py
 python -m py_compile apps/bot/config/prompts.py
 python -m py_compile apps/bot/mcp/client.py
 python -m py_compile apps/bot/tool/mcp_server/handler.py
+python -m py_compile apps/bot/tool/shell_exec/handler.py
+python -m py_compile apps/bot/tool/shell_exec/safety.py
+python -m py_compile apps/bot/config/models.py
+python -m py_compile apps/bot/provider/errors.py
+python -m py_compile apps/bot/provider/endpoint.py
 echo Build check passed.

@@ -1,0 +1,36 @@
+@startuml
+title REQ-006 Chat Request with Rotation
+
+participant "mention.py" as mention
+participant "OpenAIProvider\n.chat()" as provider
+participant "EndpointPool" as pool
+participant "Endpoint A" as epA
+participant "Endpoint B" as epB
+
+mention -> provider: chat(messages)
+
+provider -> pool: get_available("default")
+pool --> provider: [EndpointA, EndpointB]
+
+provider -> epA: _http_chat(EndpointA, messages)
+epA --> provider: HTTP 429\nRetry-After: 30
+
+provider -> pool: mark_cooldown("A", 30s)
+note right: Endpoint A enters\n30s cooldown
+
+provider -> epB: _http_chat(EndpointB, messages)
+epB --> provider: HTTP 200\nChatResponse
+
+provider --> mention: ChatResponse(text="...")
+
+== Next request (within 30s) ==
+
+mention -> provider: chat(messages)
+provider -> pool: get_available("default")
+note right: Endpoint A still\nin cooldown
+pool --> provider: [EndpointB]
+provider -> epB: _http_chat(EndpointB, messages)
+epB --> provider: HTTP 200
+provider --> mention: ChatResponse
+
+@enduml

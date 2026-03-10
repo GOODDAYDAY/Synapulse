@@ -1,0 +1,74 @@
+@startuml
+title REQ-006 Class Diagram
+
+class EndpointConfig <<dataclass>> {
+  +name: str
+  +protocol: str
+  +base_url: str
+  +api_key: str
+  +model: str
+  +tags: list[str]
+  +enabled: bool = True
+  +priority: int = 0
+}
+
+class EndpointPool {
+  -_endpoints: list[EndpointConfig]
+  -_cursors: dict[str, int]
+  -_cooldowns: dict[str, float]
+  -_lock: asyncio.Lock
+  +get_available(tag: str): list[EndpointConfig]
+  +mark_cooldown(name: str, seconds: float)
+  +advance_cursor(tag: str)
+  +update(endpoints: list[EndpointConfig])
+  +endpoint_count: int
+  +get_tag_summary(): dict[str, int]
+}
+
+class RateLimitError <<exception>> {
+  +retry_after: float
+}
+
+class EndpointError <<exception>> {
+  +status: int
+}
+
+abstract class BaseProvider {
+  #_tools: list[dict]
+  +tools: property
+  +authenticate()
+  +{abstract} build_messages()
+  +{abstract} append_tool_result()
+  +{abstract} parse_tool_calls()
+  +{abstract} compress_tool_results()
+  +{abstract} chat()
+}
+
+class OpenAIProvider {
+  +_pool: EndpointPool
+  +_default_tag: str
+  +chat(messages, tool_choice, tag): ChatResponse
+  -_http_chat(endpoint, messages, tool_choice): ChatResponse
+  +build_messages()
+  +append_tool_result()
+  +parse_tool_calls()
+  +compress_tool_results()
+}
+
+class MockProvider {
+  +chat(): ChatResponse
+}
+
+BaseProvider <|-- OpenAIProvider
+OpenAIProvider <|-- MockProvider
+EndpointPool o-- EndpointConfig : manages
+OpenAIProvider --> EndpointPool : uses
+OpenAIProvider ..> RateLimitError : catches
+OpenAIProvider ..> EndpointError : catches
+
+note right of OpenAIProvider
+  _http_chat() raises RateLimitError/EndpointError
+  chat() catches and rotates to next endpoint
+end note
+
+@enduml
