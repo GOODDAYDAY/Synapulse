@@ -8,3 +8,4 @@
 | REQ-004 | MCP Client Integration                     | Completed        | 2026-03-10 | Add MCP client support with hot-reload, 55 pre-configured servers, and dynamic server management     |
 | REQ-005 | File Write & Shell Execution               | Development Done | 2026-03-10 | Add file write capability to local_files and new shell_exec tool with safety mechanisms              |
 | REQ-006 | Multi-Model Rotation & Auto-Fallback       | Development Done | 2026-03-10 | YAML-based multi-endpoint config with tag filtering, round-robin rotation, and rate-limit fallback   |
+| REQ-007 | Config & Output Directory Reorganization   | Development Done | 2026-03-10 | Unify runtime config to top-level config/ and all output to output/ for cleaner project layout       |

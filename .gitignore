@@ -211,10 +211,16 @@ __marimo__/
 .idea/
 /nul
 
-# config
+# Runtime config (user-specific, contains secrets)
+/config/jobs.json
+/config/mcp.json
+/config/models.yaml
+
+# Runtime output (logs, data, database)
+/output/
+
+# Legacy paths (kept for transition)
 /apps/bot/config/jobs.json
 /apps/bot/config/logs/
-
-# local data (SQLite database, user data)
 /data/
-/apps/bot/data/conversations.json
+/apps/bot/data/

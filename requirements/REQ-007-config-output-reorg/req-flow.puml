@@ -1,0 +1,49 @@
+@startuml
+title REQ-007 Directory Layout - Before vs After
+
+legend top
+  Before (scattered):
+  |= Category |= Current Path |
+  | Job config | apps/bot/config/jobs.json |
+  | MCP config | apps/bot/config/mcp.json |
+  | Model config | apps/bot/config/models.yaml |
+  | Logs | apps/bot/config/logs/ |
+  | Conv data | apps/bot/data/conversations.json |
+  | Database | data/synapulse.db |
+end legend
+
+start
+:Bot starts;
+
+partition "F-03: Auto-Create Dirs" {
+  :Ensure config/ exists;
+  :Ensure output/logs/ exists;
+  :Ensure output/data/ exists;
+}
+
+partition "F-01: Load Config" {
+  :Read config/jobs.json;
+  :Read config/mcp.json;
+  :Read config/models.yaml;
+  :Read .env (root, unchanged);
+}
+
+partition "F-02: Runtime Output" {
+  :Write logs to output/logs/bot.log;
+  :Store conversations in output/data/;
+  :Database at output/data/synapulse.db;
+}
+
+stop
+
+note right
+  After (organized):
+  |= Category |= New Path |
+  | Job config | config/jobs.json |
+  | MCP config | config/mcp.json |
+  | Model config | config/models.yaml |
+  | Logs | output/logs/ |
+  | Conv data | output/data/ |
+  | Database | output/data/synapulse.db |
+end note
+@enduml

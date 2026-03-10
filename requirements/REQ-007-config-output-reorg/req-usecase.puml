@@ -1,0 +1,32 @@
+@startuml
+title REQ-007 Config & Output Reorganization - Use Cases
+
+actor Developer
+actor "Ops/Deploy" as Ops
+actor Bot
+
+rectangle "Config Management" {
+  usecase "Read runtime config\nfrom config/" as UC1
+  usecase "Edit config files\nin one location" as UC2
+  usecase "Mount config/\nfor deployment" as UC3
+}
+
+rectangle "Output Management" {
+  usecase "Write logs to\noutput/logs/" as UC4
+  usecase "Store data in\noutput/data/" as UC5
+  usecase "Mount output/\nfor persistence" as UC6
+}
+
+rectangle "Startup" {
+  usecase "Auto-create\ndirectories" as UC7
+}
+
+Developer --> UC2
+Developer --> UC1
+Ops --> UC3
+Ops --> UC6
+Bot --> UC1
+Bot --> UC4
+Bot --> UC5
+Bot --> UC7
+@enduml

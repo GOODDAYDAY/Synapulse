@@ -1,9 +1,10 @@
-import logging
 import logging.config
-from pathlib import Path
 
-_logs_dir = Path(__file__).resolve().parent / "logs"
-_logs_dir.mkdir(exist_ok=True)
+import logging
+from apps.bot.config.settings import PROJECT_ROOT
+
+_logs_dir = PROJECT_ROOT / "output" / "logs"
+_logs_dir.mkdir(parents=True, exist_ok=True)
 
 
 def _build_config(level: str = "DEBUG") -> dict:

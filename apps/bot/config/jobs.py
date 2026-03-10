@@ -9,13 +9,13 @@ treated as disabled until the file is fixed.
 """
 
 import json
-from pathlib import Path
 
 import logging
+from apps.bot.config.settings import PROJECT_ROOT
 
 logger = logging.getLogger("synapulse.config")
 
-_CONFIG_PATH = Path(__file__).resolve().parent / "jobs.json"
+_CONFIG_PATH = PROJECT_ROOT / "config" / "jobs.json"
 
 
 def load_job_config(name: str) -> dict:

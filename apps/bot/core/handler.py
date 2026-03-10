@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from apps.bot.config.models import build_legacy_endpoint, load_models_config
-from apps.bot.config.settings import config
+from apps.bot.config.settings import PROJECT_ROOT, config
 from apps.bot.core.loader import (
     merge_tool_hints,
     merge_tools_for_provider,
@@ -22,9 +22,9 @@ from apps.bot.provider.endpoint import EndpointPool
 
 logger = logging.getLogger("synapulse.core")
 
-# Config file paths
-_STATIC_MCP_CONFIG = Path(__file__).resolve().parent.parent / "config" / "mcp.json"
-_MODELS_CONFIG = Path(__file__).resolve().parent.parent / "config" / "models.yaml"
+# Config file paths (top-level config/ directory)
+_STATIC_MCP_CONFIG = PROJECT_ROOT / "config" / "mcp.json"
+_MODELS_CONFIG = PROJECT_ROOT / "config" / "models.yaml"
 
 # How often to check config files for changes (seconds)
 _MCP_RELOAD_INTERVAL = 30
@@ -148,6 +148,11 @@ async def _models_reload_loop(pool: EndpointPool, config_path: str) -> None:
 
 async def start() -> None:
     """Bootstrap the bot: config → db → provider → tools → MCP → channel + jobs + reminders."""
+    # Ensure required directories exist
+    (PROJECT_ROOT / "config").mkdir(exist_ok=True)
+    (PROJECT_ROOT / "output" / "logs").mkdir(parents=True, exist_ok=True)
+    (PROJECT_ROOT / "output" / "data").mkdir(parents=True, exist_ok=True)
+
     config.log_summary()
 
     # Init persistent storage
@@ -195,7 +200,7 @@ async def start() -> None:
 
     # --- MCP setup ---
     mcp_manager = MCPManager()
-    dynamic_config_path = str(Path(config.DATABASE_PATH).parent / "mcp_servers.json")
+    dynamic_config_path = str(PROJECT_ROOT / "output" / "data" / "mcp_servers.json")
     static_config_path = str(_STATIC_MCP_CONFIG)
 
     # Load static + dynamic MCP configs
