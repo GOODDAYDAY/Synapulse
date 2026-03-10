@@ -1,0 +1,56 @@
+[
+  {
+    "id": 19,
+    "user_id": "1426037643753426966",
+    "channel_id": "1470251439380107469",
+    "role": "user",
+    "content": "what is the weather today?",
+    "tool_summary": null,
+    "created_at": "2026-03-10T14:09:17.679239+00:00"
+  },
+  {
+    "id": 20,
+    "user_id": "1426037643753426966",
+    "channel_id": "1470251439380107469",
+    "role": "assistant",
+    "content": "The current weather in Singapore is **cloudy**, with a temperature of **27.22°C** (feels like **29.92°C**). Today's temperature ranges between **25.92°C and 27.74°C**, humidity is at **77%**, and wind speed is **3.6m/s**. Visibility is **10.0km**.\n\n- **Sunrise**: 07:12\n- **Sunset**: 19:18\n\n### 3-Day Forecast:\n- **Tomorrow**: Cloudy, 28~28°C\n- **Day after**: Overcast and cloudy, 26~32°C\n- **3rd Day**: Cloudy, 25~29°C",
+    "tool_summary": "weather",
+    "created_at": "2026-03-10T14:09:17.681239+00:00"
+  },
+  {
+    "id": 21,
+    "user_id": "1426037643753426966",
+    "channel_id": "1470251439380107469",
+    "role": "user",
+    "content": "recommend me one keyboard",
+    "tool_summary": null,
+    "created_at": "2026-03-10T14:12:45.281493+00:00"
+  },
+  {
+    "id": 22,
+    "user_id": "1426037643753426966",
+    "channel_id": "1470251439380107469",
+    "role": "assistant",
+    "content": "It depends on what you're looking for in a keyboard, but here's a great recommendation:\n\n**Keychron K8**: \n\n- **Type**: Wireless Bluetooth & Wired Mechanical Keyboard\n- **Keycaps**: Compatible with Mac and Windows layouts\n- **Switch Options**: Offers Gateron switches (Red, Blue, or Brown) for different typing feels (silent, clicky, or tactile, respectively).\n- **Features**: Compact TKL design (87 keys), RGB backlighting, supports multiple device connections.\n\nIt's highly versatile, has great build quality, and is perfect for both work and gaming. Let me know if you want additional recommendations based on budget or specific preferences!",
+    "tool_summary": null,
+    "created_at": "2026-03-10T14:12:45.283494+00:00"
+  },
+  {
+    "id": 23,
+    "user_id": "1426037643753426966",
+    "channel_id": "1470251439380107469",
+    "role": "user",
+    "content": "tell the space of PC",
+    "tool_summary": null,
+    "created_at": "2026-03-10T14:21:52.010282+00:00"
+  },
+  {
+    "id": 24,
+    "user_id": "1426037643753426966",
+    "channel_id": "1470251439380107469",
+    "role": "assistant",
+    "content": "Could you clarify what you mean by \"the space of PC\"? Are you referring to storage capacity (such as disk space), physical dimensions, or something else?",
+    "tool_summary": null,
+    "created_at": "2026-03-10T14:21:52.011393+00:00"
+  }
+]

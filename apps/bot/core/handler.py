@@ -35,7 +35,7 @@ def _get_enabled_servers(servers: dict) -> dict:
     """Filter server configs to only those with enabled=True (default True for backward compat)."""
     return {
         name: cfg for name, cfg in servers.items()
-        if cfg.get("enabled", True) and name != "_comment"
+        if isinstance(cfg, dict) and cfg.get("enabled", True) and name != "_comment"
     }
 
 
@@ -148,11 +148,6 @@ async def _models_reload_loop(pool: EndpointPool, config_path: str) -> None:
 
 async def start() -> None:
     """Bootstrap the bot: config → db → provider → tools → MCP → channel + jobs + reminders."""
-    # Ensure required directories exist
-    (PROJECT_ROOT / "config").mkdir(exist_ok=True)
-    (PROJECT_ROOT / "output" / "logs").mkdir(parents=True, exist_ok=True)
-    (PROJECT_ROOT / "output" / "data").mkdir(parents=True, exist_ok=True)
-
     config.log_summary()
 
     # Init persistent storage

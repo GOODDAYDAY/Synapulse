@@ -148,8 +148,11 @@ class OpenAIProvider(BaseProvider):
             return ChatResponse(text=f"[AI Error] No available endpoints for tag '{effective_tag}'")
 
         last_error: Exception | None = None
-        for endpoint in endpoints:
+        for i, endpoint in enumerate(endpoints):
             try:
+                if i > 0:
+                    logger.info("Rotating to endpoint '%s' (attempt %d/%d)",
+                                endpoint.name, i + 1, len(endpoints))
                 return await self._http_chat(endpoint, messages, tool_choice)
             except RateLimitError as e:
                 logger.warning(
@@ -196,8 +199,8 @@ class OpenAIProvider(BaseProvider):
                 payload["tool_choice"] = tool_choice
 
         url = f"{endpoint.base_url}/chat/completions"
-        logger.debug("Chat request -> %s (model=%s, messages=%d)",
-                     endpoint.name, endpoint.model, len(messages))
+        logger.info("Chat request -> %s (model=%s, messages=%d)",
+                    endpoint.name, endpoint.model, len(messages))
 
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers, json=payload) as resp:

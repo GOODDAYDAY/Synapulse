@@ -2,8 +2,6 @@
 
 import logging
 
-import aiohttp
-
 from apps.bot.config.settings import config
 from apps.bot.tool.base import AnthropicTool, OpenAITool
 
@@ -39,6 +37,8 @@ class Tool(OpenAITool, AnthropicTool):
             )
 
     async def execute(self, query: str) -> str:
+        import aiohttp
+
         logger.info("Searching: %s", query)
         headers = {
             "Accept": "application/json",

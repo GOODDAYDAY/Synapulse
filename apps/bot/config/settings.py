@@ -18,6 +18,11 @@ import logging
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
+# Ensure top-level directories exist at import time
+(PROJECT_ROOT / "config").mkdir(exist_ok=True)
+(PROJECT_ROOT / "output" / "logs").mkdir(parents=True, exist_ok=True)
+(PROJECT_ROOT / "output" / "data").mkdir(parents=True, exist_ok=True)
+
 logger = logging.getLogger("synapulse.config")
 
 _MASKED_KEYWORDS = {"TOKEN", "SECRET", "KEY", "PASSWORD"}
@@ -47,6 +52,7 @@ class Config:
 
     # Tools
     BRAVE_API_KEY: str = os.getenv("BRAVE_API_KEY", "")
+    OPENWEATHER_API_KEY: str = os.getenv("OPENWEATHER_API_KEY", "")
     LOCAL_FILES_ALLOWED_PATHS: str = os.getenv("LOCAL_FILES_ALLOWED_PATHS", "")
 
     # Jobs — Gmail (secrets only; operational config in config/jobs.json)
