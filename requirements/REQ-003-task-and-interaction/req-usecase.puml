@@ -1,0 +1,51 @@
+@startuml
+title REQ-003 Task Management & Notification Interaction
+
+actor User
+actor "Background Job" as Job
+
+rectangle "Task Management (F-01)" {
+  (Create Task) as CT
+  (List Tasks) as LT
+  (Update Task) as UT
+  (Complete Task) as CPT
+  (Delete Task) as DT
+}
+
+rectangle "Task Context (F-02)" {
+  (Inject Task Summary\ninto System Prompt) as ITS
+  (Proactive Task\nReminder) as PTR
+}
+
+rectangle "Notification Interaction (F-03)" {
+  (Send Notification) as SN
+  (Reply to Notification) as RN
+  (Inject Referenced\nMessage Context) as IRC
+}
+
+User --> CT
+User --> LT
+User --> UT
+User --> CPT
+User --> DT
+
+User --> RN
+User --> PTR
+
+Job --> SN
+
+RN --> IRC : triggers
+ITS --> PTR : enables
+
+note right of CT
+  AI tool "task" with actions:
+  create, list, update, complete, delete
+  Persisted in tasks.json
+end note
+
+note right of RN
+  User replies to bot message.
+  Discord message reference
+  provides original content.
+end note
+@enduml

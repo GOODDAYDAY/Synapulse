@@ -1,4 +1,4 @@
-"""Persistent storage for conversations, memos, and reminders.
+"""Persistent storage for conversations, memos, reminders, and tasks.
 
 JSON file-based storage — one file per data type under a configurable directory.
 Single Database class, created once by core at startup, injected into tools and
@@ -16,6 +16,7 @@ _CONVERSATIONS_FILE = "conversations.json"
 _SUMMARIES_FILE = "summaries.json"
 _MEMOS_FILE = "memos.json"
 _REMINDERS_FILE = "reminders.json"
+_TASKS_FILE = "tasks.json"
 
 
 def _now() -> str:
@@ -60,6 +61,7 @@ class Database:
             "conversations": self._max_id(_CONVERSATIONS_FILE) + 1,
             "memos": self._max_id(_MEMOS_FILE) + 1,
             "reminders": self._max_id(_REMINDERS_FILE) + 1,
+            "tasks": self._max_id(_TASKS_FILE) + 1,
         }
         logger.info("Database ready (JSON file storage)")
 
@@ -306,3 +308,99 @@ class Database:
                 r["fired"] = 1
                 break
         _save_json(path, data)
+
+    # --- Tasks (REQ-003 F-01) ---
+
+    _PRIORITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+
+    async def save_task(
+            self, user_id: str, title: str,
+            description: str = "", priority: str = "medium",
+            due_date: str | None = None,
+    ) -> int:
+        """Create a task, return its ID."""
+        path = self._path(_TASKS_FILE)
+        data = _load_json(path)
+        now = _now()
+        task_id = self._next_id("tasks")
+        data.append({
+            "id": task_id,
+            "user_id": user_id,
+            "title": title,
+            "description": description,
+            "status": "todo",
+            "priority": priority,
+            "due_date": due_date,
+            "created_at": now,
+            "updated_at": now,
+        })
+        _save_json(path, data)
+        logger.info("Created task #%d for user=%s: %s", task_id, user_id, title)
+        return task_id
+
+    async def list_tasks(
+            self, user_id: str,
+            status: str | None = None,
+            priority: str | None = None,
+            limit: int = 20,
+    ) -> list[dict]:
+        """List tasks for a user, filtered by status and/or priority.
+
+        Default: exclude completed tasks. Sorted by priority (high first) then due_date.
+        """
+        data = _load_json(self._path(_TASKS_FILE))
+        matching = [t for t in data if t["user_id"] == user_id]
+
+        if status:
+            matching = [t for t in matching if t["status"] == status]
+        else:
+            # Default: exclude done tasks
+            matching = [t for t in matching if t["status"] != "done"]
+
+        if priority:
+            matching = [t for t in matching if t["priority"] == priority]
+
+        # Sort by priority (high first), then due_date (earliest first, null last)
+        matching.sort(key=lambda t: (
+            self._PRIORITY_ORDER.get(t["priority"], 9),
+            t["due_date"] or "9999-12-31",
+        ))
+        return matching[:limit]
+
+    async def update_task(self, task_id: int, **fields) -> bool:
+        """Update task fields. Returns True if found and updated."""
+        path = self._path(_TASKS_FILE)
+        data = _load_json(path)
+        allowed = {"title", "description", "status", "priority", "due_date"}
+
+        for task in data:
+            if task["id"] == task_id:
+                for key, value in fields.items():
+                    if key in allowed:
+                        task[key] = value
+                task["updated_at"] = _now()
+                _save_json(path, data)
+                logger.info("Updated task #%d: %s", task_id, list(fields.keys()))
+                return True
+        return False
+
+    async def complete_task(self, task_id: int) -> bool:
+        """Mark a task as done. Returns True if found."""
+        return await self.update_task(task_id, status="done")
+
+    async def delete_task(self, task_id: int) -> bool:
+        """Delete a task by ID. Returns True if deleted."""
+        path = self._path(_TASKS_FILE)
+        data = _load_json(path)
+        new_data = [t for t in data if t["id"] != task_id]
+        if len(new_data) == len(data):
+            return False
+        _save_json(path, new_data)
+        logger.info("Deleted task #%d", task_id)
+        return True
+
+    async def get_pending_tasks_summary(
+            self, user_id: str, limit: int = 20,
+    ) -> list[dict]:
+        """Get pending tasks for context injection (status != done)."""
+        return await self.list_tasks(user_id, limit=limit)

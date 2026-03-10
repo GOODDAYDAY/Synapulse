@@ -12,6 +12,7 @@ python -m py_compile apps/bot/core/loader.py
 python -m py_compile apps/bot/memory/database.py
 python -m py_compile apps/bot/tool/memo/handler.py
 python -m py_compile apps/bot/tool/reminder/handler.py
+python -m py_compile apps/bot/tool/task/handler.py
 python -m py_compile apps/bot/tool/brave_search/handler.py
 python -m py_compile apps/bot/tool/local_files/handler.py
 python -m py_compile apps/bot/config/settings.py

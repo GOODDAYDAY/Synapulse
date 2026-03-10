@@ -1,0 +1,31 @@
+@startuml
+title Notification Interaction Flow (F-03)
+
+start
+
+:User sends message\nreplying to a bot message;
+
+if (Message is a reply\nto bot's message?) then (yes)
+  :Extract referenced\nmessage content;
+  if (Content too long?) then (yes)
+    :Truncate to 2000 chars;
+  else (no)
+  endif
+  :Inject as context:\n"[Referenced bot message]\n<content>";
+else (no)
+endif
+
+:Load conversation\nmemory (REQ-002);
+
+:Load pending tasks\nfor task context (F-02);
+
+:Build system prompt\nwith memory + tasks;
+
+:Build user prompt\nwith history + reference + message;
+
+:Enter tool-call loop;
+
+:Return AI response;
+
+stop
+@enduml

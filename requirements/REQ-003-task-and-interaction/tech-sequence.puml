@@ -1,0 +1,50 @@
+@startuml
+title Mention with Task Context + Message Reference
+
+participant "Discord Client" as DC
+participant "mention.py" as MH
+participant "database.py" as DB
+participant "prompts.py" as PR
+participant "Provider (AI)" as AI
+participant "tool/task" as TT
+
+== User replies to a bot notification ==
+
+DC -> DC: Detect message.reference
+DC -> DC: Fetch referenced message\n(bot's notification)
+DC -> DC: Truncate to 2000 chars
+DC -> MH: on_mention(content, channel_id,\nuser_id, history, referenced_content)
+
+== Load context ==
+
+MH -> DB: load_summary(user_id, channel_id)
+DB --> MH: memory_summary
+
+MH -> DB: load_turns(user_id, channel_id)
+DB --> MH: stored_turns
+
+MH -> DB: get_pending_tasks_summary(user_id)
+DB --> MH: task_summary
+
+MH -> PR: build_system_prompt(\ntool_hints, memory_summary, task_summary)
+PR --> MH: system_prompt
+
+MH -> MH: _build_user_prompt(\ncontent, stored_turns,\nhistory, referenced_content)
+
+== Tool-call loop ==
+
+MH -> AI: chat(messages)
+AI --> MH: tool_call: task.list()
+
+MH -> TT: execute(action="list")
+TT -> DB: list_tasks(user_id)
+DB --> TT: tasks
+TT --> MH: formatted task list
+
+MH -> AI: chat(messages + tool_result)
+AI --> MH: text response
+
+MH -> DB: save_turn(user, assistant)
+MH --> DC: reply text
+
+@enduml

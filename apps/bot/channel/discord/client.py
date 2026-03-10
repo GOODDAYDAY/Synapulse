@@ -13,6 +13,8 @@ logger = logging.getLogger("synapulse.discord")
 HISTORY_LIMIT = 5
 # Discord enforces a 2000-character limit per message.
 DISCORD_MSG_LIMIT = 2000
+# Max characters to extract from a referenced (replied-to) bot message.
+_REFERENCE_CONTENT_CAP = 2000
 
 
 class Channel(BaseChannel):
@@ -60,6 +62,20 @@ class Channel(BaseChannel):
             # Acknowledge with reaction
             await message.add_reaction("\U0001f64b\u200d\u2640\ufe0f")
 
+            # Extract referenced message content if user replied to a bot message
+            referenced_content = None
+            if message.reference:
+                try:
+                    ref_msg = message.reference.resolved
+                    if ref_msg is None:
+                        ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                    if ref_msg and ref_msg.author == bot.user and ref_msg.content:
+                        referenced_content = ref_msg.content[:_REFERENCE_CONTENT_CAP]
+                        logger.debug("Extracted referenced bot message (%d chars)",
+                                     len(referenced_content))
+                except Exception:
+                    logger.warning("Failed to fetch referenced message, ignoring")
+
             # Gather recent history for context
             history = []
             async for msg in message.channel.history(limit=HISTORY_LIMIT, before=message):
@@ -72,7 +88,7 @@ class Channel(BaseChannel):
             channel_id = str(message.channel.id)
             user_id = str(message.author.id)
             async with message.channel.typing():
-                reply = await on_mention(content, channel_id, user_id, history)
+                reply = await on_mention(content, channel_id, user_id, history, referenced_content)
 
             await self._send_chunks(message.channel, reply)
 

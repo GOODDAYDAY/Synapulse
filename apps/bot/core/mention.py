@@ -32,6 +32,8 @@ _LOG_RESULT_MAX = 200
 _COMPRESS_THRESHOLD = 200
 # Max characters of conversation history injected into user prompt.
 _HISTORY_CONTEXT_CAP = 3000
+# Max characters of task summary injected into system prompt.
+_TASK_CONTEXT_CAP = 1000
 # Summarize when turn count exceeds this threshold.
 _SUMMARIZE_THRESHOLD = 20
 # Keep the most recent N turns when summarizing (don't summarize these).
@@ -53,7 +55,7 @@ def make_mention_handler(
         tools: dict,
         send_file: _ChannelSendFile | None = None,
         db: Database | None = None,
-) -> Callable[[str, str, str, list[dict[str, str]] | None], Coroutine[Any, Any, str]]:
+) -> Callable[[str, str, str, list[dict[str, str]] | None, str | None], Coroutine[Any, Any, str]]:
     """Create a handle_mention callback with provider, tools, and db closed over."""
 
     # Build tool hints once (static part of prompt).
@@ -64,6 +66,7 @@ def make_mention_handler(
             channel_id: str = "",
             user_id: str = "default",
             history: list[dict[str, str]] | None = None,
+            referenced_content: str | None = None,
     ) -> str:
         """Process an @mention: load memory, call AI, save turn, maybe summarize.
 
@@ -71,7 +74,7 @@ def make_mention_handler(
         user-visible messages so the channel never gets an unhandled exception.
         """
         try:
-            return await _handle_mention_inner(content, channel_id, user_id, history)
+            return await _handle_mention_inner(content, channel_id, user_id, history, referenced_content)
         except Exception:
             logger.exception("Unhandled error in mention handler")
             return "Something went wrong while processing your request. Please try again later."
@@ -81,6 +84,7 @@ def make_mention_handler(
             channel_id: str = "",
             user_id: str = "default",
             history: list[dict[str, str]] | None = None,
+            referenced_content: str | None = None,
     ) -> str:
         # Inject scoped callbacks into tools for this message
         if send_file and channel_id:
@@ -97,8 +101,9 @@ def make_mention_handler(
                     len(content), user_id, channel_id, len(history or []))
         logger.info("Available tools: %s", list(tools.keys()) if tools else "(none)")
 
-        # --- Load memory from database ---
+        # --- Load memory and task context from database ---
         memory_summary = None
+        task_summary = None
         stored_turns = []
         if db:
             try:
@@ -109,11 +114,19 @@ def make_mention_handler(
             except Exception:
                 logger.exception("Failed to load memory, proceeding without")
 
-        # --- Build system prompt with memory ---
-        system_prompt = build_system_prompt(tool_hints, memory_summary)
+            try:
+                pending_tasks = await db.get_pending_tasks_summary(user_id)
+                if pending_tasks:
+                    task_summary = _format_task_summary(pending_tasks)
+                    logger.info("Loaded %d pending tasks for context", len(pending_tasks))
+            except Exception:
+                logger.exception("Failed to load tasks, proceeding without")
 
-        # --- Build user prompt from content + stored history + channel history ---
-        user_prompt = _build_user_prompt(content, stored_turns, history)
+        # --- Build system prompt with memory and tasks ---
+        system_prompt = build_system_prompt(tool_hints, memory_summary, task_summary)
+
+        # --- Build user prompt from content + stored history + channel history + reference ---
+        user_prompt = _build_user_prompt(content, stored_turns, history, referenced_content)
 
         messages = provider.build_messages(system_prompt, user_prompt)
 
@@ -194,8 +207,9 @@ def _build_user_prompt(
         content: str,
         stored_turns: list[dict],
         channel_history: list[dict[str, str]] | None,
+        referenced_content: str | None = None,
 ) -> str:
-    """Build user prompt with conversation context from stored turns and channel history."""
+    """Build user prompt with conversation context from stored turns, channel history, and reference."""
     parts = []
 
     # Stored conversation history from database (cross-session memory)
@@ -216,10 +230,30 @@ def _build_user_prompt(
         context = "\n".join(f"{m['author']}: {m['content']}" for m in channel_history)
         parts.append(f"[Recent channel messages]\n{context}")
 
+    # Referenced bot message (user replied to a bot message)
+    if referenced_content:
+        parts.append(f"[Referenced bot message]\n{referenced_content}")
+
     # Current user message
     parts.append(f"[User message]\n{content}")
 
     return "\n\n".join(parts)
+
+
+def _format_task_summary(tasks: list[dict]) -> str:
+    """Format pending tasks into a compact summary for system prompt injection."""
+    lines = []
+    total_chars = 0
+    for t in tasks:
+        due = f" (due {t['due_date']})" if t.get("due_date") else ""
+        prio = f" [{t['priority']}]" if t["priority"] != "medium" else ""
+        line = f"#{t['id']}{prio}{due}: {t['title']}"
+        if total_chars + len(line) > _TASK_CONTEXT_CAP:
+            lines.append(f"... and {len(tasks) - len(lines)} more")
+            break
+        lines.append(line)
+        total_chars += len(line)
+    return "\n".join(lines)
 
 
 async def _save_turn(

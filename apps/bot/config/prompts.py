@@ -55,19 +55,25 @@ BEHAVIOR_STRATEGY = (
     "- Use web search for current events, facts you're unsure about, or real-time data\n"
     "- Answer directly (no tools) for general knowledge, opinions, or casual chat\n"
     "- When clearing history is requested, confirm with the user before proceeding\n"
+    "- Use task tool to track to-dos, action items, and deadlines\n"
+    "- When user asks about their schedule or what to do, check pending tasks\n"
+    "- Do not create tasks for every request — only when user explicitly asks to track something\n"
 )
 
 # Max characters for memory summary injected into system prompt
 _MEMORY_SUMMARY_CAP = 2000
+# Max characters for task summary injected into system prompt
+_TASK_SUMMARY_CAP = 1000
 
 
 def build_system_prompt(
         tool_hints: str,
         memory_summary: str | None = None,
+        task_summary: str | None = None,
 ) -> str:
-    """Assemble the full system prompt with tools and optional memory context.
+    """Assemble the full system prompt with tools, memory, and task context.
 
-    Called once per mention handler creation (or per mention if memory changes).
+    Called once per mention handler creation (or per mention if context changes).
     """
     parts = [SYSTEM_PROMPT]
 
@@ -77,6 +83,13 @@ def build_system_prompt(
         parts.append(
             f"\n## Memory\n"
             f"Summary of previous conversations with this user:\n{capped}\n"
+        )
+
+    # Pending tasks context
+    if task_summary:
+        capped = task_summary[:_TASK_SUMMARY_CAP]
+        parts.append(
+            f"\n## Pending Tasks\n{capped}\n"
         )
 
     # Tools section (only when tools are loaded)
