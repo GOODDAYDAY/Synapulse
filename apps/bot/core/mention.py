@@ -8,6 +8,9 @@ MAX_TOOL_ROUNDS. A 1-second pause between rounds prevents API rate limiting.
 Memory integration: before the loop, load conversation history and summary
 from the database. After the loop, save the new turn and optionally trigger
 summarization of old turns.
+
+MCP integration: when a tool call targets an MCP tool (not found in native tools),
+the call is dispatched to the MCPManager for execution via the MCP protocol.
 """
 
 import asyncio
@@ -20,6 +23,7 @@ import jsonschema
 
 from apps.bot.config.prompts import build_system_prompt
 from apps.bot.core.loader import format_tool_hints
+from apps.bot.mcp.client import MCPManager
 from apps.bot.memory.database import Database
 from apps.bot.provider.base import BaseProvider
 
@@ -55,11 +59,18 @@ def make_mention_handler(
         tools: dict,
         send_file: _ChannelSendFile | None = None,
         db: Database | None = None,
+        mcp_manager: MCPManager | None = None,
+        tool_hints_ref: Callable[[], str] | None = None,
 ) -> Callable[[str, str, str, list[dict[str, str]] | None, str | None], Coroutine[Any, Any, str]]:
-    """Create a handle_mention callback with provider, tools, and db closed over."""
+    """Create a handle_mention callback with provider, tools, MCP, and db closed over.
 
-    # Build tool hints once (static part of prompt).
-    tool_hints = format_tool_hints(tools) if tools else ""
+    Args:
+        tool_hints_ref: Callable returning current tool hints string. Used instead
+            of a static string because MCP tools can change at runtime.
+    """
+
+    # Fallback: build static tool hints if no dynamic ref provided
+    _static_hints = format_tool_hints(tools) if tools else ""
 
     async def handle_mention(
             content: str,
@@ -123,7 +134,8 @@ def make_mention_handler(
                 logger.exception("Failed to load tasks, proceeding without")
 
         # --- Build system prompt with memory and tasks ---
-        system_prompt = build_system_prompt(tool_hints, memory_summary, task_summary)
+        current_hints = tool_hints_ref() if tool_hints_ref else _static_hints
+        system_prompt = build_system_prompt(current_hints, memory_summary, task_summary)
 
         # --- Build user prompt from content + stored history + channel history + reference ---
         user_prompt = _build_user_prompt(content, stored_turns, history, referenced_content)
@@ -158,25 +170,34 @@ def make_mention_handler(
 
             for call in response.tool_calls:
                 tool = tools.get(call.name)
-                if not tool:
+                is_mcp = False
+
+                if not tool and mcp_manager and mcp_manager.has_tool(call.name):
+                    is_mcp = True
+                elif not tool:
                     logger.warning("Unknown tool requested: %s", call.name)
                     provider.append_tool_result(messages, call, f"Error: unknown tool '{call.name}'")
                     continue
 
-                # Validate arguments against tool's JSON Schema before executing.
-                try:
-                    jsonschema.validate(call.arguments, tool.parameters)
-                except jsonschema.ValidationError as e:
-                    logger.warning("Invalid arguments for %s: %s", call.name, e.message)
-                    provider.append_tool_result(
-                        messages, call,
-                        f"Parameter error: {e.message}. Check the tool schema and retry.",
-                    )
-                    continue
+                # Validate arguments against JSON Schema before executing.
+                schema = tool.parameters if tool else (mcp_manager.get_tool_schema(call.name) if mcp_manager else None)
+                if schema:
+                    try:
+                        jsonschema.validate(call.arguments, schema)
+                    except jsonschema.ValidationError as e:
+                        logger.warning("Invalid arguments for %s: %s", call.name, e.message)
+                        provider.append_tool_result(
+                            messages, call,
+                            f"Parameter error: {e.message}. Check the tool schema and retry.",
+                        )
+                        continue
 
-                logger.info("Executing tool: %s(%s)", call.name, call.arguments)
+                logger.info("Executing %s tool: %s(%s)", "MCP" if is_mcp else "native", call.name, call.arguments)
                 try:
-                    result = await tool.execute(**call.arguments)
+                    if is_mcp:
+                        result = await mcp_manager.call_tool(call.name, call.arguments)
+                    else:
+                        result = await tool.execute(**call.arguments)
                 except Exception as e:
                     logger.exception("Tool execution failed: %s", call.name)
                     result = f"Error: {e}"

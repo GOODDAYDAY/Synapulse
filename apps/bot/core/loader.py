@@ -55,6 +55,39 @@ def format_tools_for_provider(tools: dict, api_format: str) -> list[dict]:
     return formatted
 
 
+def merge_tools_for_provider(
+        native_tools: dict,
+        mcp_tools: list,
+        api_format: str,
+) -> list[dict]:
+    """Merge native tools and MCP tool wrappers into one provider-formatted list.
+
+    MCP tool wrappers implement the same to_openai()/to_anthropic() interface
+    via duck typing, so they are formatted identically.
+    """
+    formatted = format_tools_for_provider(native_tools, api_format)
+    method_name = f"to_{api_format}"
+    for wrapper in mcp_tools:
+        method = getattr(wrapper, method_name, None)
+        if method:
+            formatted.append(method())
+        else:
+            logger.warning("MCP tool %s doesn't support format: %s", wrapper.name, api_format)
+    return formatted
+
+
+def merge_tool_hints(native_tools: dict, mcp_tools: list) -> str:
+    """Build combined tool hints for system prompt from native tools and MCP tools."""
+    lines = []
+    for tool in native_tools.values():
+        hint = tool.usage_hint or tool.description
+        lines.append(f"- {tool.name}: {hint}")
+    for wrapper in mcp_tools:
+        hint = wrapper.usage_hint or wrapper.description
+        lines.append(f"- {wrapper.name}: {hint}")
+    return "\n".join(lines)
+
+
 def scan_jobs() -> list[BaseJob]:
     """Auto-scan job/ subfolders and load all valid Job classes."""
     job_dir = Path(__file__).resolve().parent.parent / "job"

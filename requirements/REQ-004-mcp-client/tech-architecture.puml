@@ -1,0 +1,61 @@
+@startuml
+title REQ-004 MCP Client Integration - Architecture
+
+package "core" {
+  [handler.py\nBootstrap Orchestrator] as handler
+  [mention.py\nTool-call Loop] as mention
+  [loader.py\nDynamic Discovery] as loader
+}
+
+package "mcp" <<NEW>> {
+  [client.py\nMCPManager] as mcpmgr
+  [MCPToolWrapper\nFormat Adapter] as wrapper
+}
+
+package "tool" {
+  [mcp_server/handler.py\nManagement Tool] as mcptool
+  [brave_search] as brave
+  [memo] as memo
+  [task] as task
+}
+
+package "provider" {
+  [BaseProvider\nOpenAI / Anthropic] as provider
+}
+
+package "config" {
+  [mcp.json\nStatic Config] as staticcfg
+}
+
+database "data/" {
+  [mcp_servers.json\nDynamic Config] as dynamiccfg
+}
+
+cloud "External MCP Servers" {
+  [stdio process 1] as proc1
+  [stdio process 2] as proc2
+}
+
+handler --> mcpmgr : create & connect
+handler --> loader : scan_tools + merge MCP
+handler --> mention : inject mcp_manager
+handler --> provider : provider.tools = merged list
+
+mention --> provider : chat()
+mention --> brave : execute()
+mention --> memo : execute()
+mention --> task : execute()
+mention --> mcpmgr : call_tool()
+
+mcptool --> mcpmgr : connect / disconnect
+mcptool --> dynamiccfg : persist config
+
+mcpmgr --> staticcfg : load on startup
+mcpmgr --> proc1 : stdio
+mcpmgr --> proc2 : stdio
+mcpmgr --> wrapper : wrap discovered tools
+
+loader --> wrapper : to_openai() / to_anthropic()
+loader --> brave : to_openai() / to_anthropic()
+
+@enduml

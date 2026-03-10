@@ -1,0 +1,30 @@
+@startuml
+title REQ-004 MCP Tool Call Flow
+
+participant User
+participant Discord as "Discord\nChannel"
+participant Mention as "mention.py\nTool-call Loop"
+participant Provider as "AI Provider"
+participant MCPManager as "MCPManager"
+participant MCPServer as "MCP Server\n(stdio)"
+
+User -> Discord : @bot what issues are open?
+Discord -> Mention : on_mention(content, ...)
+
+Mention -> Provider : chat(messages)\n[includes MCP tools in tool list]
+Provider --> Mention : ChatResponse(tool_calls=["github_list_issues"])
+
+Mention -> Mention : tools.get("github_list_issues") → None
+Mention -> MCPManager : call_tool("github_list_issues", {repo: "..."})
+MCPManager -> MCPManager : lookup tool_index\n→ server "github"
+MCPManager -> MCPServer : session.call_tool("github_list_issues", args)
+MCPServer --> MCPManager : CallToolResult(content=[TextContent])
+MCPManager --> Mention : "Found 3 open issues: ..."
+
+Mention -> Provider : chat(messages + tool result)
+Provider --> Mention : ChatResponse(text="Here are your open issues...")
+
+Mention --> Discord : reply text
+Discord --> User : "Here are your open issues..."
+
+@enduml

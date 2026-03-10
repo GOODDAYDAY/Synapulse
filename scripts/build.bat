@@ -17,4 +17,6 @@ python -m py_compile apps/bot/tool/brave_search/handler.py
 python -m py_compile apps/bot/tool/local_files/handler.py
 python -m py_compile apps/bot/config/settings.py
 python -m py_compile apps/bot/config/prompts.py
+python -m py_compile apps/bot/mcp/client.py
+python -m py_compile apps/bot/tool/mcp_server/handler.py
 echo Build check passed.

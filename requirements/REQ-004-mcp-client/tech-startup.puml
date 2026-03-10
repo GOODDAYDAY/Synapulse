@@ -1,0 +1,48 @@
+@startuml
+title REQ-004 MCP Startup and Server Add Flow
+
+participant Handler as "handler.py"
+participant MCPManager as "MCPManager"
+participant Loader as "loader.py"
+participant Provider as "AI Provider"
+participant MCPTool as "mcp_server\ntool"
+
+== Startup: Load Static + Dynamic Config ==
+
+Handler -> Handler : _load_mcp_config("config/mcp.json")
+Handler -> Handler : _load_mcp_config("data/mcp_servers.json")
+Handler -> Handler : merge configs\n(dynamic overrides static)
+
+loop for each configured server
+  Handler -> MCPManager : connect(name, config)
+  MCPManager -> MCPManager : stdio_client(command, args, env)
+  MCPManager -> MCPManager : ClientSession.initialize()
+  MCPManager -> MCPManager : session.list_tools()
+  MCPManager -> MCPManager : register tools + update index
+  alt connection failure
+    MCPManager --> Handler : log warning, skip server
+  end
+end
+
+Handler -> Loader : merge_tools_for_provider(\nnative_tools, mcp_manager.get_all_tools(), api_format)
+Loader --> Handler : merged tool list
+Handler -> Provider : provider.tools = merged list
+
+== Runtime: User Adds Server via Chat ==
+
+MCPTool -> MCPManager : connect("notion", config)
+MCPManager -> MCPManager : stdio → session → initialize → list_tools
+MCPManager --> MCPTool : discovered tool names
+
+MCPTool -> MCPTool : persist to data/mcp_servers.json
+MCPTool -> MCPTool : _rebuild_tools() callback
+
+note right of MCPTool
+  rebuild_tools() re-merges
+  native + MCP tools and
+  updates provider.tools
+end note
+
+MCPTool --> MCPTool : return success message to AI
+
+@enduml
