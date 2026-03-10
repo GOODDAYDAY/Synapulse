@@ -1,0 +1,53 @@
+@startuml
+participant User
+participant Discord as Channel
+participant "mention.py" as Mention
+participant "provider" as Provider
+participant "tool" as Tool
+
+User -> Channel: @mention message
+activate Channel
+Channel -> Channel: add reaction
+Channel -> Channel: fetch history (last 5)
+Channel -> Mention: on_mention(content, channel_id, history)
+activate Mention
+
+Mention -> Provider: build_messages(system_prompt, user_prompt)
+activate Provider
+Provider --> Mention: messages
+deactivate Provider
+
+loop max 10 rounds
+  Mention -> Provider: chat(messages)
+  activate Provider
+  Provider --> Mention: ChatResponse
+
+  alt text response (no tool_calls)
+    Mention --> Channel: return text
+  else tool_calls present
+    deactivate Provider
+    loop for each tool_call
+      Mention -> Mention: validate args (JSON Schema)
+      alt valid
+        Mention -> Tool: execute(**args)
+        activate Tool
+        Tool --> Mention: result (str)
+        deactivate Tool
+      else invalid
+        Mention -> Mention: error message as result
+      end
+      Mention -> Provider: append_tool_result(messages, call, result)
+    end
+    Mention -> Provider: compress_tool_results(messages)
+    Mention -> Mention: sleep(1s)
+  end
+end
+
+Mention --> Channel: final text or max-rounds message
+deactivate Mention
+
+Channel -> Channel: split if > 2000 chars
+Channel -> User: send reply
+deactivate Channel
+
+@enduml

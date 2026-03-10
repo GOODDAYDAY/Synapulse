@@ -1,0 +1,110 @@
+@startuml
+skinparam componentStyle rectangle
+
+package "apps/bot" {
+
+  package "config" {
+    [settings.py] as CFG
+    [prompts.py] as PROMPT
+    [logging.py] as LOG
+    [jobs.py] as JOBCFG
+  }
+
+  package "core" {
+    [handler.py] as HANDLER
+    [loader.py] as LOADER
+    [mention.py] as MENTION
+  }
+
+  package "channel" {
+    [base.py] as CH_BASE
+    package "discord" {
+      [client.py] as DISCORD
+    }
+  }
+
+  package "provider" {
+    [base.py] as PR_BASE
+    package "copilot" {
+      [chat.py] as COPILOT
+      [auth.py] as AUTH
+    }
+    package "mock" {
+      [chat.py] as MOCK
+    }
+    package "ollama" {
+      [chat.py] as OLLAMA
+    }
+  }
+
+  package "tool" {
+    [base.py] as TL_BASE
+    package "brave_search" {
+      [handler.py] as BRAVE
+    }
+    package "local_files" {
+      [handler.py] as FILES
+    }
+  }
+
+  package "job" {
+    [base.py] as JB_BASE
+    [cron.py] as CRON
+    [listen.py] as LISTEN
+    [_imap.py] as IMAP
+    package "gmail" {
+      [handler.py] as GMAIL
+    }
+    package "outlook" {
+      [handler.py] as OUTLOOK_JOB
+    }
+    package "qqmail" {
+      [handler.py] as QQMAIL
+    }
+  }
+
+  [main.py] as MAIN
+}
+
+' Entry
+MAIN --> HANDLER : asyncio.run
+
+' Core orchestrates everything
+HANDLER --> CFG : log_summary
+HANDLER --> LOADER : scan_tools, scan_jobs
+HANDLER --> MENTION : make_mention_handler
+LOADER ..> TL_BASE : importlib
+LOADER ..> JB_BASE : importlib
+HANDLER ..> PR_BASE : importlib
+HANDLER ..> CH_BASE : importlib
+
+' Mention loop
+MENTION --> PR_BASE : chat, compress
+MENTION --> TL_BASE : execute
+
+' Inheritance
+DISCORD --|> CH_BASE
+COPILOT --|> PR_BASE
+MOCK --|> PR_BASE
+OLLAMA --|> PR_BASE
+BRAVE --|> TL_BASE
+FILES --|> TL_BASE
+CRON --|> JB_BASE
+LISTEN --|> JB_BASE
+IMAP --|> CRON
+GMAIL --|> IMAP
+OUTLOOK_JOB --|> IMAP
+QQMAIL --|> IMAP
+
+' Config shared
+CFG <.. HANDLER
+CFG <.. DISCORD
+CFG <.. COPILOT
+CFG <.. BRAVE
+CFG <.. FILES
+CFG <.. GMAIL
+JOBCFG <.. CRON
+JOBCFG <.. LISTEN
+PROMPT <.. MENTION
+
+@enduml

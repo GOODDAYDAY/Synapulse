@@ -1,0 +1,34 @@
+@startuml
+left to right direction
+
+actor User
+
+rectangle "Discord AI Bot" {
+  usecase "Chat with AI\nvia @mention" as UC1
+  usecase "Web Search\n(brave_search)" as UC2
+  usecase "Browse Local Files\n(local_files)" as UC3
+  usecase "Receive Email\nNotifications" as UC4
+  usecase "Configure Jobs\nvia jobs.json" as UC5
+  usecase "Switch AI Provider\nvia .env" as UC6
+}
+
+User --> UC1
+User --> UC4
+User --> UC5
+User --> UC6
+UC1 ..> UC2 : <<extend>>
+UC1 ..> UC3 : <<extend>>
+
+note right of UC2
+  AI decides when to
+  call tools based on
+  user's question
+end note
+
+note right of UC4
+  Gmail / Outlook / QQ Mail
+  monitored via IMAP
+  AI classifies & summarizes
+end note
+
+@enduml
