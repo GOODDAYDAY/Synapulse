@@ -4,9 +4,9 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Coroutine
 from typing import Any, TypeAlias
 
-# Callback type: (content, channel_id, history) -> reply
+# Callback type: (content, channel_id, user_id, history) -> reply
 MentionHandler: TypeAlias = Callable[
-    [str, str, list[dict[str, str]] | None],
+    [str, str, str, list[dict[str, str]] | None],
     Coroutine[Any, Any, str],
 ]
 

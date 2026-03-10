@@ -1,9 +1,10 @@
-"""
-Prompt templates shared across all AI providers.
+"""Prompt templates shared across all AI providers.
 
 SYSTEM_PROMPT defines the bot's identity and behavior (static).
 TOOLS_GUIDANCE is the general tool-use preamble, injected only when tools are loaded.
+BEHAVIOR_STRATEGY provides guidance on tool usage and multi-step tasks.
 Per-tool routing hints come from each tool's usage_hint attribute — see core/loader.py.
+build_system_prompt() assembles the final prompt with optional memory context.
 """
 
 SYSTEM_PROMPT = (
@@ -24,14 +25,17 @@ SYSTEM_PROMPT = (
     "\n"
     "## Capabilities\n"
     "- Answer questions across a wide range of topics\n"
-    "- Help with scheduling, reminders, and daily planning\n"
+    "- Remember things the user tells you (via memo tool)\n"
+    "- Set timed reminders that fire as notifications\n"
+    "- Search the web for current information\n"
+    "- Browse and read local files\n"
     "- Assist with writing, translation, and summarization\n"
     "- Provide technical help: code review, debugging, explanations\n"
-    "- Offer recommendations: books, tools, solutions\n"
     "\n"
     "## Constraints\n"
     "- Do not fabricate facts — if unsure, use a tool or say you don't know\n"
     "- Keep responses focused and relevant to the user's request\n"
+    "- Never store passwords, tokens, or secrets in memos\n"
 )
 
 TOOLS_GUIDANCE = (
@@ -40,3 +44,43 @@ TOOLS_GUIDANCE = (
     "then execute each step with tool calls. Do NOT stop after one tool call — keep going "
     "until the task is FULLY done. Only give your final answer when all steps are complete.\n"
 )
+
+BEHAVIOR_STRATEGY = (
+    "\n## Strategy\n"
+    "- Use memo tool to save facts the user explicitly asks you to remember\n"
+    "- Use memo search to recall saved facts before answering from memory\n"
+    "- Use reminder tool when the user asks to be reminded at a specific time\n"
+    "- For time-based reminders, convert natural language time to ISO 8601 format "
+    "(e.g. 'in 5 minutes' → calculate the absolute time, 'tomorrow 3pm' → 2026-03-11T15:00:00)\n"
+    "- Use web search for current events, facts you're unsure about, or real-time data\n"
+    "- Answer directly (no tools) for general knowledge, opinions, or casual chat\n"
+    "- When clearing history is requested, confirm with the user before proceeding\n"
+)
+
+# Max characters for memory summary injected into system prompt
+_MEMORY_SUMMARY_CAP = 2000
+
+
+def build_system_prompt(
+        tool_hints: str,
+        memory_summary: str | None = None,
+) -> str:
+    """Assemble the full system prompt with tools and optional memory context.
+
+    Called once per mention handler creation (or per mention if memory changes).
+    """
+    parts = [SYSTEM_PROMPT]
+
+    # Memory context (from conversation summary)
+    if memory_summary:
+        capped = memory_summary[:_MEMORY_SUMMARY_CAP]
+        parts.append(
+            f"\n## Memory\n"
+            f"Summary of previous conversations with this user:\n{capped}\n"
+        )
+
+    # Tools section (only when tools are loaded)
+    if tool_hints:
+        parts.append(f"\n## Tools\n{TOOLS_GUIDANCE}{BEHAVIOR_STRATEGY}{tool_hints}\n")
+
+    return "".join(parts)

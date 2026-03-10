@@ -21,6 +21,7 @@ class BaseTool(ABC):
     parameters: dict  # JSON Schema
     usage_hint: str = ""  # Short routing hint for system prompt (falls back to description)
     send_file: SendFileCallback | None = None  # Injected by core per-message
+    db: Any = None  # Injected by core at startup (Database instance for tools that need persistence)
 
     def validate(self) -> None:
         """Override to validate tool-specific config (e.g. API keys)."""

@@ -1,0 +1,68 @@
+@startuml
+title REQ-002 Data Model - SQLite Tables
+
+entity "conversations" as conv {
+  * id : INTEGER <<PK>>
+  --
+  * user_id : TEXT
+  * channel_id : TEXT
+  * role : TEXT
+  * content : TEXT
+  tool_summary : TEXT
+  * created_at : TEXT
+  ..
+  index(user_id, channel_id, created_at)
+}
+
+entity "summaries" as summ {
+  * id : INTEGER <<PK>>
+  --
+  * user_id : TEXT
+  * channel_id : TEXT
+  * content : TEXT
+  * updated_at : TEXT
+  ..
+  unique(user_id, channel_id)
+}
+
+entity "memos" as memo {
+  * id : INTEGER <<PK>>
+  --
+  * user_id : TEXT
+  * content : TEXT
+  * created_at : TEXT
+  * updated_at : TEXT
+  ..
+  index(user_id, created_at DESC)
+}
+
+entity "reminders" as remind {
+  * id : INTEGER <<PK>>
+  --
+  * user_id : TEXT
+  * channel_id : TEXT
+  * message : TEXT
+  * remind_at : TEXT
+  recurrence : TEXT
+  * fired : INTEGER
+  * created_at : TEXT
+  ..
+  index(fired, remind_at)
+}
+
+note right of conv
+  One row per message turn.
+  role = "user" | "assistant"
+  tool_summary = "brave_search,memo"
+end note
+
+note right of summ
+  One summary per user+channel.
+  Replaced on each re-summarization.
+end note
+
+note right of remind
+  fired: 0=pending, 1=fired
+  recurrence: null | "daily" | "weekly"
+end note
+@enduml

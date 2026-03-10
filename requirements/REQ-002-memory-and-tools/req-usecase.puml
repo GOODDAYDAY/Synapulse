@@ -1,0 +1,53 @@
+@startuml
+title REQ-002 Memory Layer & Core Tools - Use Cases
+
+actor User
+
+rectangle "Memory Layer" {
+  (Continuous Conversation) as UC1
+  (Recall Past Context) as UC2
+  (Clear History) as UC3
+  (Auto Summarize Old History) as UC4
+}
+
+rectangle "Memo Tool" {
+  (Save Memo) as UC5
+  (Search Memo) as UC6
+  (List Memos) as UC7
+  (Delete Memo) as UC8
+}
+
+rectangle "Reminder Tool" {
+  (Create Reminder) as UC9
+  (List Reminders) as UC10
+  (Cancel Reminder) as UC11
+  (Receive Reminder Notification) as UC12
+}
+
+User --> UC1 : mention with context
+User --> UC2 : reference past conversation
+User --> UC3 : "clear my history"
+UC1 ..> UC4 : <<include>>\nwhen turns > threshold
+
+User --> UC5 : "remember: ..."
+User --> UC6 : "what is my ...?"
+User --> UC7 : "list my notes"
+User --> UC8 : "delete note about ..."
+
+User --> UC9 : "remind me in 5 min"
+User --> UC10 : "list my reminders"
+User --> UC11 : "cancel reminder"
+User <-- UC12 : push notification
+
+note right of UC4
+  AI compresses old turns
+  into a summary.
+  Summary replaces raw
+  history in context.
+end note
+
+note right of UC12
+  Fires at scheduled time.
+  Recovers after restart.
+end note
+@enduml

@@ -1,0 +1,38 @@
+@startuml
+title Mention Handling with Memory Layer
+
+start
+
+:Receive @mention from user;
+
+:Load conversation history\nfrom SQLite (user_id + channel_id);
+
+if (History load succeeds?) then (yes)
+  if (History has summary?) then (yes)
+    :Inject summary + recent turns\ninto context;
+  else (no)
+    :Inject recent turns into context;
+  endif
+else (no)
+  :Log warning, proceed\nwithout history;
+  note right: Graceful degradation
+endif
+
+:Build messages:\nsystem_prompt (with memory)\n+ user_prompt (with history);
+
+:Enter tool-call loop\n(existing mention.py logic);
+
+:AI returns final response;
+
+:Save conversation turn to SQLite\n(user msg + AI reply + tool summary);
+
+if (Total turns > threshold?) then (yes)
+  :Summarize oldest turns via AI;
+  :Store summary, delete\nsummarized raw turns;
+else (no)
+endif
+
+:Send response to Discord;
+
+stop
+@enduml

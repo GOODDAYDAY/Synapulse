@@ -61,6 +61,9 @@ class Config:
     QQ_MAIL_ADDRESS: str = os.getenv("QQ_MAIL_ADDRESS", "")
     QQ_MAIL_APP_PASSWORD: str = os.getenv("QQ_MAIL_APP_PASSWORD", "")
 
+    # Storage
+    DATABASE_PATH: str = os.getenv("DATABASE_PATH", "data/synapulse.db")
+
     # General
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "DEBUG")
 

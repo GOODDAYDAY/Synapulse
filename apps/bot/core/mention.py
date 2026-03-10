@@ -1,9 +1,13 @@
-"""Mention handling — tool-call loop and message building.
+"""Mention handling — tool-call loop, memory load/save, and summarization.
 
 The tool-call loop lets the AI call tools multiple times in sequence.
 Each round: AI responds → core executes any tool calls → results fed back.
 The loop ends when the AI returns a text response (no tool calls), or after
 MAX_TOOL_ROUNDS. A 1-second pause between rounds prevents API rate limiting.
+
+Memory integration: before the loop, load conversation history and summary
+from the database. After the loop, save the new turn and optionally trigger
+summarization of old turns.
 """
 
 import asyncio
@@ -14,8 +18,9 @@ from typing import Any
 
 import jsonschema
 
-from apps.bot.config.prompts import SYSTEM_PROMPT, TOOLS_GUIDANCE
+from apps.bot.config.prompts import build_system_prompt
 from apps.bot.core.loader import format_tool_hints
+from apps.bot.memory.database import Database
 from apps.bot.provider.base import BaseProvider
 
 logger = logging.getLogger("synapulse.core")
@@ -25,6 +30,19 @@ MAX_TOOL_ROUNDS = 10
 _LOG_RESULT_MAX = 200
 # Compress consumed tool results longer than this to save tokens on subsequent rounds.
 _COMPRESS_THRESHOLD = 200
+# Max characters of conversation history injected into user prompt.
+_HISTORY_CONTEXT_CAP = 3000
+# Summarize when turn count exceeds this threshold.
+_SUMMARIZE_THRESHOLD = 20
+# Keep the most recent N turns when summarizing (don't summarize these).
+_SUMMARIZE_KEEP_RECENT = 5
+
+_SUMMARIZE_PROMPT = (
+    "Summarize the following conversation between a user and an AI assistant. "
+    "Include: key topics discussed, user preferences or facts discovered, "
+    "important conclusions or decisions. Be concise (under 500 words). "
+    "Write in the same language the user used."
+)
 
 # Type for the raw channel send_file callback: (channel_id, file_path, comment) -> None
 _ChannelSendFile = Callable[[str, str, str], Coroutine[Any, Any, None]]
@@ -34,28 +52,26 @@ def make_mention_handler(
         provider: BaseProvider,
         tools: dict,
         send_file: _ChannelSendFile | None = None,
-) -> Callable[[str, str, list[dict[str, str]] | None], Coroutine[Any, Any, str]]:
-    """Create a handle_mention callback with provider and tools closed over."""
+        db: Database | None = None,
+) -> Callable[[str, str, str, list[dict[str, str]] | None], Coroutine[Any, Any, str]]:
+    """Create a handle_mention callback with provider, tools, and db closed over."""
 
-    # Build system prompt once — base identity + dynamic tool hints (if any).
-    if tools:
-        hints = format_tool_hints(tools)
-        system_prompt = f"{SYSTEM_PROMPT}\n## Tools\n{TOOLS_GUIDANCE}{hints}\n"
-    else:
-        system_prompt = SYSTEM_PROMPT
+    # Build tool hints once (static part of prompt).
+    tool_hints = format_tool_hints(tools) if tools else ""
 
     async def handle_mention(
             content: str,
             channel_id: str = "",
+            user_id: str = "default",
             history: list[dict[str, str]] | None = None,
     ) -> str:
-        """Process an @mention: build context, call provider, orchestrate tool-call loop.
+        """Process an @mention: load memory, call AI, save turn, maybe summarize.
 
         This function ALWAYS returns a string — errors are caught and turned into
         user-visible messages so the channel never gets an unhandled exception.
         """
         try:
-            return await _handle_mention_inner(content, channel_id, history)
+            return await _handle_mention_inner(content, channel_id, user_id, history)
         except Exception:
             logger.exception("Unhandled error in mention handler")
             return "Something went wrong while processing your request. Please try again later."
@@ -63,27 +79,46 @@ def make_mention_handler(
     async def _handle_mention_inner(
             content: str,
             channel_id: str = "",
+            user_id: str = "default",
             history: list[dict[str, str]] | None = None,
     ) -> str:
-        # Inject scoped send_file callback into tools for this message
+        # Inject scoped callbacks into tools for this message
         if send_file and channel_id:
             scoped = partial(send_file, channel_id)
             for tool in tools.values():
                 tool.send_file = scoped
 
-        logger.info("Handling mention (length=%d, history=%d)", len(content), len(history or []))
+        # Inject channel_id into reminder tool for this message
+        for tool in tools.values():
+            if hasattr(tool, "channel_id"):
+                tool.channel_id = channel_id
+
+        logger.info("Handling mention (length=%d, user=%s, channel=%s, history=%d)",
+                    len(content), user_id, channel_id, len(history or []))
         logger.info("Available tools: %s", list(tools.keys()) if tools else "(none)")
 
-        # Build user prompt from content + history
-        if history:
-            context = "\n".join(f"{m['author']}: {m['content']}" for m in history)
-            user_prompt = f"[Recent channel messages]\n{context}\n\n[User message]\n{content}"
-        else:
-            user_prompt = content
+        # --- Load memory from database ---
+        memory_summary = None
+        stored_turns = []
+        if db:
+            try:
+                memory_summary = await db.load_summary(user_id, channel_id)
+                stored_turns = await db.load_turns(user_id, channel_id, limit=20)
+                logger.info("Loaded memory: summary=%s, turns=%d",
+                            "yes" if memory_summary else "no", len(stored_turns))
+            except Exception:
+                logger.exception("Failed to load memory, proceeding without")
+
+        # --- Build system prompt with memory ---
+        system_prompt = build_system_prompt(tool_hints, memory_summary)
+
+        # --- Build user prompt from content + stored history + channel history ---
+        user_prompt = _build_user_prompt(content, stored_turns, history)
 
         messages = provider.build_messages(system_prompt, user_prompt)
 
-        # Tool-call loop: core orchestrates, provider formats messages
+        # --- Tool-call loop: core orchestrates, provider formats messages ---
+        tool_names_used = []
         for round_num in range(1, MAX_TOOL_ROUNDS + 1):
             logger.info("--- Tool-call loop round %d/%d ---", round_num, MAX_TOOL_ROUNDS)
             response = await provider.chat(messages)
@@ -93,6 +128,12 @@ def make_mention_handler(
                 preview = text[:_LOG_RESULT_MAX].replace("\n", " | ")
                 logger.info("AI returned text (round %d, length=%d): %s",
                             round_num, len(text), preview)
+
+                # --- Save turn to database ---
+                if db:
+                    await _save_turn(db, user_id, channel_id, content, text, tool_names_used)
+                    await _maybe_summarize(db, provider, user_id, channel_id)
+
                 return text
 
             logger.info("AI requested %d tool call(s) in round %d: %s",
@@ -100,7 +141,6 @@ def make_mention_handler(
                         [c.name for c in response.tool_calls])
 
             # AI has consumed all current messages — compress old tool results
-            # so the next round doesn't re-send large payloads.
             provider.compress_tool_results(messages, _COMPRESS_THRESHOLD)
 
             for call in response.tool_calls:
@@ -128,6 +168,7 @@ def make_mention_handler(
                     logger.exception("Tool execution failed: %s", call.name)
                     result = f"Error: {e}"
 
+                tool_names_used.append(call.name)
                 # Collapse newlines so multi-line results stay on one log line.
                 preview = result[:_LOG_RESULT_MAX].replace("\n", " | ")
                 logger.info("Tool result from %s (length=%d): %s",
@@ -135,12 +176,104 @@ def make_mention_handler(
                 provider.append_tool_result(messages, call, result)
 
             # Pause between rounds to avoid hitting provider API rate limits.
-            # Tools like local_files may need many rounds (browse → drill down → read),
-            # each round triggers a provider.chat() call on the next iteration.
             logger.debug("Sleeping 1s before next round")
             await asyncio.sleep(1)
 
         logger.warning("Tool-call loop hit max rounds (%d)", MAX_TOOL_ROUNDS)
-        return "Sorry, I got stuck in a loop. Please try again."
+        max_round_reply = "Sorry, I got stuck in a loop. Please try again."
+
+        if db:
+            await _save_turn(db, user_id, channel_id, content, max_round_reply, tool_names_used)
+
+        return max_round_reply
 
     return handle_mention
+
+
+def _build_user_prompt(
+        content: str,
+        stored_turns: list[dict],
+        channel_history: list[dict[str, str]] | None,
+) -> str:
+    """Build user prompt with conversation context from stored turns and channel history."""
+    parts = []
+
+    # Stored conversation history from database (cross-session memory)
+    if stored_turns:
+        turn_lines = []
+        total_chars = 0
+        for turn in stored_turns:
+            line = f"{turn['role']}: {turn['content']}"
+            if total_chars + len(line) > _HISTORY_CONTEXT_CAP:
+                break
+            turn_lines.append(line)
+            total_chars += len(line)
+        if turn_lines:
+            parts.append("[Previous conversation history]\n" + "\n".join(turn_lines))
+
+    # Recent channel messages (Discord real-time context)
+    if channel_history:
+        context = "\n".join(f"{m['author']}: {m['content']}" for m in channel_history)
+        parts.append(f"[Recent channel messages]\n{context}")
+
+    # Current user message
+    parts.append(f"[User message]\n{content}")
+
+    return "\n\n".join(parts)
+
+
+async def _save_turn(
+        db: Database, user_id: str, channel_id: str,
+        user_content: str, ai_reply: str, tool_names: list[str],
+) -> None:
+    """Save user message and AI reply to database."""
+    try:
+        tool_summary = ", ".join(dict.fromkeys(tool_names)) if tool_names else ""
+        await db.save_turn(user_id, channel_id, "user", user_content, "")
+        await db.save_turn(user_id, channel_id, "assistant", ai_reply, tool_summary)
+    except Exception:
+        logger.exception("Failed to save conversation turn")
+
+
+async def _maybe_summarize(
+        db: Database, provider: BaseProvider, user_id: str, channel_id: str,
+) -> None:
+    """Summarize old conversation turns if count exceeds threshold."""
+    try:
+        count = await db.count_turns(user_id, channel_id)
+        if count <= _SUMMARIZE_THRESHOLD:
+            return
+
+        logger.info("Turn count %d exceeds threshold %d, summarizing", count, _SUMMARIZE_THRESHOLD)
+        all_turns = await db.load_turns(user_id, channel_id, limit=count)
+
+        # Keep recent turns, summarize the rest
+        old_turns = all_turns[:-_SUMMARIZE_KEEP_RECENT]
+        if not old_turns:
+            return
+
+        # Build text for summarization
+        old_text = "\n".join(f"{t['role']}: {t['content']}" for t in old_turns)
+
+        # Include existing summary for cascading summarization
+        existing = await db.load_summary(user_id, channel_id)
+        if existing:
+            old_text = f"[Previous summary]\n{existing}\n\n[New conversations]\n{old_text}"
+
+        messages = provider.build_messages(_SUMMARIZE_PROMPT, old_text)
+        response = await provider.chat(messages)
+        summary = response.text
+
+        if not summary:
+            logger.warning("Summarization returned empty, skipping")
+            return
+
+        await db.save_summary(user_id, channel_id, summary)
+
+        # Delete only the summarized turns (keep recent ones)
+        cutoff = old_turns[-1]["created_at"]
+        await db.clear_turns(user_id, channel_id, before=cutoff)
+        logger.info("Summarized %d turns, kept %d recent", len(old_turns), _SUMMARIZE_KEEP_RECENT)
+
+    except Exception:
+        logger.exception("Summarization failed, keeping raw turns")

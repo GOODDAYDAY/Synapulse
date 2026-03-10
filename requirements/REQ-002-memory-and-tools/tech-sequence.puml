@@ -1,0 +1,57 @@
+@startuml
+title Mention Handling with Memory - Sequence
+
+actor User
+participant Discord as ch
+participant "mention.py" as mention
+participant "database.py" as db
+participant "prompts.py" as prompts
+participant Provider as ai
+
+User -> ch: @mention "what did I say yesterday?"
+ch -> mention: handle_mention(content, channel_id, history)
+
+== Load Memory ==
+
+mention -> db: load_summary(user_id, channel_id)
+db --> mention: summary (or None)
+
+mention -> db: load_turns(user_id, channel_id, limit=20)
+db --> mention: recent_turns[]
+
+mention -> prompts: build_system_prompt(tools, summary)
+prompts --> mention: system_prompt
+
+note right of mention
+  Inject recent_turns into
+  user prompt as context block.
+  Cap at 3000 chars.
+end note
+
+== Tool-call Loop (unchanged) ==
+
+mention -> ai: chat(messages)
+ai --> mention: ChatResponse(text="Yesterday you asked about...")
+
+== Save Turn ==
+
+mention -> db: save_turn(user_id, channel_id, "user", content)
+mention -> db: save_turn(user_id, channel_id, "assistant", reply)
+
+mention -> db: count_turns(user_id, channel_id)
+db --> mention: count = 25
+
+== Summarize if threshold exceeded ==
+
+alt count > 20
+  mention -> db: load_turns(user_id, channel_id)
+  db --> mention: all_turns[]
+  mention -> ai: chat(summarization_prompt + old_turns)
+  ai --> mention: summary_text
+  mention -> db: save_summary(user_id, channel_id, summary_text)
+  mention -> db: clear_turns(user_id, channel_id, before=cutoff)
+end
+
+mention --> ch: reply text
+ch --> User: bot response
+@enduml

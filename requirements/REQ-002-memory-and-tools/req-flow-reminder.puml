@@ -1,0 +1,35 @@
+@startuml
+title Reminder Lifecycle
+
+start
+
+partition "Creation" {
+  :User: "remind me at 3pm to call Bob";
+  :AI parses natural language\ninto ISO timestamp;
+  :AI calls reminder.create\n(timestamp, message, channel_id);
+  :Store reminder in SQLite;
+  :Confirm to user: "Reminder set for 3:00 PM";
+}
+
+partition "Background Checker" {
+  :Reminder checker loop\n(runs every 30s);
+  :Query SQLite for\ndue reminders (time <= now);
+  if (Due reminders found?) then (yes)
+    :Send notification to channel\nvia channel.send callback;
+    :Mark reminder as fired in SQLite;
+  else (no)
+  endif
+}
+
+partition "Restart Recovery" {
+  :Bot restarts;
+  :Load all unfired reminders\nfrom SQLite;
+  if (Overdue reminders exist?) then (yes)
+    :Fire immediately\nwith [Delayed] tag;
+  else (no)
+    :Resume normal scheduling;
+  endif
+}
+
+stop
+@enduml

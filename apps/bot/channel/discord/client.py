@@ -70,8 +70,9 @@ class Channel(BaseChannel):
 
             # Delegate to core via callback
             channel_id = str(message.channel.id)
+            user_id = str(message.author.id)
             async with message.channel.typing():
-                reply = await on_mention(content, channel_id, history)
+                reply = await on_mention(content, channel_id, user_id, history)
 
             await self._send_chunks(message.channel, reply)
 

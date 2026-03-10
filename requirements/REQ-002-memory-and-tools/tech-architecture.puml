@@ -1,0 +1,72 @@
+@startuml
+title REQ-002 Architecture - Memory Layer Integration
+
+package "core" {
+  [handler.py\nBootstrap Orchestrator] as handler
+  [mention.py\nTool-call Loop\n+ History Load/Save\n+ Summarization] as mention
+  [reminder.py\nBackground Checker\n(30s poll)] as checker
+}
+
+package "memory" <<NEW>> {
+  [database.py\nDatabase class\n(aiosqlite)] as db
+}
+
+database "SQLite" {
+  [conversations] as tbl_conv
+  [summaries] as tbl_sum
+  [memos] as tbl_memo
+  [reminders] as tbl_remind
+}
+
+package "tool" {
+  [memo/handler.py\nMemo Tool] as memo_tool
+  [reminder/handler.py\nReminder Tool] as reminder_tool
+  [brave_search/\n(unchanged)] as brave
+  [local_files/\n(unchanged)] as files
+}
+
+package "channel" {
+  [discord/client.py] as discord
+}
+
+package "provider" {
+  [copilot / ollama / mock] as provider
+}
+
+package "config" {
+  [settings.py\n+ DATABASE_PATH] as config
+  [prompts.py\n+ build_system_prompt()\n+ BEHAVIOR_STRATEGY] as prompts
+}
+
+handler --> db : creates & injects
+handler --> mention : creates handler
+handler --> checker : starts task
+
+mention --> db : load/save turns\nload/save summary
+mention --> provider : chat (conversation\n+ summarization)
+mention --> prompts : build_system_prompt()
+
+checker --> db : get_due_reminders()\nmark_fired()
+checker --> discord : notify(channel_id, msg)
+
+memo_tool --> db : save/list/search/delete
+reminder_tool --> db : create/list/cancel
+
+db --> tbl_conv
+db --> tbl_sum
+db --> tbl_memo
+db --> tbl_remind
+
+config --> db : DATABASE_PATH
+
+note right of db
+  Single Database instance
+  shared by all consumers.
+  Injected by core at startup.
+end note
+
+note bottom of checker
+  Same notify callback
+  pattern as jobs.
+end note
+@enduml
