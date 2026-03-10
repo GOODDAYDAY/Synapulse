@@ -8,6 +8,9 @@ and wrapped into format-compatible objects for the AI provider.
 import asyncio
 import json
 import logging
+import os
+import shutil
+import sys
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -100,10 +103,23 @@ class MCPManager:
         timeout_ms = config.get("timeout", _DEFAULT_TIMEOUT_MS)
         timeout_s = timeout_ms / 1000
 
+        command = config["command"]
+        # Windows: npx/uvx need .cmd suffix for subprocess_exec to find them
+        if sys.platform == "win32" and not Path(command).suffix:
+            resolved = shutil.which(command)
+            if resolved:
+                command = resolved
+
+        # Merge config env into system env (not replace) so PATH etc. are preserved
+        merged_env = None
+        config_env = config.get("env")
+        if config_env:
+            merged_env = {**os.environ, **config_env}
+
         server_params = StdioServerParameters(
-            command=config["command"],
+            command=command,
             args=config.get("args", []),
-            env=config.get("env"),
+            env=merged_env,
         )
 
         stack = AsyncExitStack()
@@ -183,12 +199,12 @@ class MCPManager:
         for tool in entry.tools:
             self._tool_index.pop(tool.name, None)
 
-        # Close the connection
+        # Close the connection — catch all errors including RuntimeError from anyio
         if entry._stack:
             try:
                 await entry._stack.aclose()
-            except Exception:
-                logger.exception("Error closing MCP server '%s'", name)
+            except (Exception, BaseException) as e:
+                logger.warning("Error closing MCP server '%s': %s", name, type(e).__name__)
 
         logger.info("MCP server '%s' disconnected", name)
         return True
@@ -277,6 +293,22 @@ class MCPManager:
                 "tools": [t.name for t in entry.tools],
             })
         return servers
+
+    def get_tools_by_names(self, names: list[str]) -> list[MCPToolWrapper]:
+        """Return MCP tool wrappers matching the given names."""
+        result = []
+        for name in names:
+            server_name = self._tool_index.get(name)
+            if not server_name:
+                continue
+            entry = self._servers.get(server_name)
+            if not entry:
+                continue
+            for tool in entry.tools:
+                if tool.name == name:
+                    result.append(tool)
+                    break
+        return result
 
     def list_tools(self, server_name: str | None = None) -> list[dict]:
         """Return tool details for a specific server or all servers."""

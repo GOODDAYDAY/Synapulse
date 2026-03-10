@@ -1,0 +1,42 @@
+@startuml
+title MCP On-Demand Tool Loading Sequence
+
+participant "User" as user
+participant "mention.py" as mention
+participant "Provider" as provider
+participant "mcp_server\ntool" as mcptool
+participant "MCPManager" as mgr
+participant "AI API" as ai
+
+user -> mention : @mention message
+
+mention -> provider : chat(messages)\n[native tools only]
+provider -> ai : POST /chat/completions\ntools: [8 native schemas]
+ai --> provider : tool_call: mcp_server\n(action="use_tools",\ntools=["search_repositories"])
+provider --> mention : ChatResponse(tool_calls)
+
+mention -> mcptool : execute(action="use_tools",\ntools=["search_repositories"])
+mcptool --> mention : "Activated 1 MCP tool(s)"
+
+mention -> mgr : get_tools_by_names(["search_repositories"])
+mgr --> mention : [MCPToolWrapper]
+mention -> mention : active_mcp_schemas += schema
+
+mention -> provider : chat(messages)\n[native + activated MCP tools]
+provider -> ai : POST /chat/completions\ntools: [8 native + 1 MCP schema]
+ai --> provider : tool_call: search_repositories\n(query="user:GOODDAYDAY")
+provider --> mention : ChatResponse(tool_calls)
+
+mention -> mgr : call_tool("search_repositories", args)
+mgr --> mention : result (21647 chars)
+
+mention -> mention : truncate to max_result_chars
+
+mention -> provider : chat(messages)\n[with truncated result]
+provider -> ai : POST /chat/completions
+ai --> provider : text response
+provider --> mention : ChatResponse(text)
+
+mention -> mention : restore provider.tools\n= original (native only)
+mention --> user : AI response
+@enduml

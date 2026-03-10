@@ -224,3 +224,5 @@ __marimo__/
 /apps/bot/config/logs/
 /data/
 /apps/bot/data/
+/apps/bot/output/
+/apps/bot/undefined/

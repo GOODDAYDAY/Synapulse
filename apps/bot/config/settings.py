@@ -25,7 +25,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 logger = logging.getLogger("synapulse.config")
 
-_MASKED_KEYWORDS = {"TOKEN", "SECRET", "KEY", "PASSWORD"}
+_MASKED_KEYWORDS = {"TOKEN", "SECRET", "KEY", "PASSWORD", "PAT"}
 
 
 def _mask(name: str, value: str) -> str:
@@ -47,6 +47,7 @@ class Config:
     AI_PROVIDER: str = os.getenv("AI_PROVIDER", "mock")
     GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "")
     GITHUB_CLIENT_ID: str = os.getenv("GITHUB_CLIENT_ID", "")
+    GITHUB_PAT: str = os.getenv("GITHUB_PAT", "")
     AI_MODEL: str = os.getenv("AI_MODEL", "gpt-4o-mini")
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 

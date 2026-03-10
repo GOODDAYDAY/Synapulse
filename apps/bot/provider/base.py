@@ -44,6 +44,7 @@ class BaseProvider(ABC):
         self._tools: list[dict] = []
         self._pool: EndpointPool | None = None
         self._default_tag: str = "default"
+        self._max_result_chars: int = 16000  # Updated after each chat() call
 
     @property
     def tools(self) -> list[dict]:
@@ -53,6 +54,11 @@ class BaseProvider(ABC):
     @tools.setter
     def tools(self, value: list[dict]) -> None:
         self._tools = value
+
+    @property
+    def max_result_chars(self) -> int:
+        """Max chars for a single tool result. Set by the last-used endpoint."""
+        return self._max_result_chars
 
     def authenticate(self) -> None:
         """Override for providers that need authentication at startup."""
@@ -197,6 +203,9 @@ class OpenAIProvider(BaseProvider):
             payload["tools"] = self.tools
             if tool_choice:
                 payload["tool_choice"] = tool_choice
+
+        # Update max_result_chars from the endpoint being used
+        self._max_result_chars = endpoint.max_result_chars
 
         url = f"{endpoint.base_url}/chat/completions"
         logger.info("Chat request -> %s (model=%s, messages=%d)",

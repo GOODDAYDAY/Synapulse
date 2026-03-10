@@ -12,7 +12,7 @@ SYSTEM_PROMPT = (
     "\n"
     "## Identity\n"
     "- Name: Synapulse\n"
-    "- An open-source personal assistant project by GoodyHao: https://github.com/GOODDAYDAY/Synapulse\n"
+    "- An open-source personal assistant project\n"
     "- Role: Personal assistant, private butler, knowledgeable companion\n"
     "- Personality: Warm, reliable, attentive to detail\n"
     "\n"
@@ -69,6 +69,10 @@ _MEMORY_SUMMARY_CAP = 2000
 # Max characters for task summary injected into system prompt
 _TASK_SUMMARY_CAP = 1000
 
+# Runtime context populated by core at startup (e.g. GitHub user info from PAT).
+# Keys are section labels, values are lists of prompt lines.
+runtime_context: dict[str, list[str]] = {}
+
 
 def build_system_prompt(
         tool_hints: str,
@@ -80,6 +84,11 @@ def build_system_prompt(
     Called once per mention handler creation (or per mention if context changes).
     """
     parts = [SYSTEM_PROMPT]
+
+    # Runtime context — injected by core at startup (e.g. owner GitHub username)
+    if runtime_context:
+        for lines in runtime_context.values():
+            parts.append("\n" + "\n".join(lines) + "\n")
 
     # Memory context (from conversation summary)
     if memory_summary:

@@ -3,13 +3,14 @@
 import asyncio
 import importlib
 import logging
+import os
 from pathlib import Path
 
 from apps.bot.config.models import build_legacy_endpoint, load_models_config
 from apps.bot.config.settings import PROJECT_ROOT, config
 from apps.bot.core.loader import (
+    format_tools_for_provider,
     merge_tool_hints,
-    merge_tools_for_provider,
     scan_jobs,
     scan_tools,
 )
@@ -31,12 +32,77 @@ _MCP_RELOAD_INTERVAL = 30
 _MODELS_RELOAD_INTERVAL = 30
 
 
+def _expand_mcp_env(server_config: dict) -> None:
+    """Expand ${VAR} references in MCP server env to actual os.environ values."""
+    env = server_config.get("env")
+    if not isinstance(env, dict):
+        return
+    for key, value in env.items():
+        if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+            var_name = value[2:-1]
+            env[key] = os.environ.get(var_name, "")
+
+
 def _get_enabled_servers(servers: dict) -> dict:
     """Filter server configs to only those with enabled=True (default True for backward compat)."""
     return {
         name: cfg for name, cfg in servers.items()
         if isinstance(cfg, dict) and cfg.get("enabled", True) and name != "_comment"
     }
+
+
+async def _detect_owner_context(mcp_manager: MCPManager) -> None:
+    """Auto-detect owner identity from connected MCP services.
+
+    If a GitHub MCP server is connected, call its API to get the authenticated
+    user's login and inject it into the system prompt as runtime context.
+    """
+    from apps.bot.config.prompts import runtime_context
+
+    # Check if GitHub MCP is connected and has a tool we can use to identify the user
+    if not mcp_manager.has_tool("search_users"):
+        return
+
+    # The GitHub MCP server uses a PAT — we can get the user from the PAT directly
+    # via the GitHub REST API, which is faster and more reliable than MCP tools.
+    github_entry = mcp_manager._servers.get("github")
+    if not github_entry:
+        return
+
+    pat = github_entry.config.get("env", {}).get("GITHUB_PERSONAL_ACCESS_TOKEN", "")
+    if not pat:
+        return
+
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                    "https://api.github.com/user",
+                    headers={"Authorization": f"token {pat}", "Accept": "application/vnd.github+json"},
+                    timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    logger.warning("GitHub user detection failed: HTTP %d", resp.status)
+                    return
+                data = await resp.json()
+
+        login = data.get("login", "")
+        name = data.get("name", "")
+        if not login:
+            return
+
+        lines = []
+        if name:
+            lines.append(f"- Owner: {name}")
+        lines.append(
+            f"- Owner's GitHub username: {login} "
+            f"(use `user:{login}` when searching their repositories)"
+        )
+        runtime_context["github_owner"] = lines
+        logger.info("Detected GitHub owner: %s (login=%s)", name or login, login)
+
+    except Exception:
+        logger.warning("GitHub user detection failed, skipping", exc_info=True)
 
 
 def _server_config_changed(old: dict, new: dict) -> bool:
@@ -69,6 +135,8 @@ async def _mcp_reload_loop(
             dynamic = load_mcp_config(dynamic_config_path)
             merged = {**static, **dynamic}
             desired = _get_enabled_servers(merged)
+            for cfg in desired.values():
+                _expand_mcp_env(cfg)
 
             # Current state
             current_names = {s["name"] for s in mcp_manager.list_servers()}
@@ -211,6 +279,8 @@ async def start() -> None:
     # Connect to enabled MCP servers
     native_tool_names = set(tools.keys())
     enabled_servers = _get_enabled_servers(merged_servers)
+    for server_config in enabled_servers.values():
+        _expand_mcp_env(server_config)
     for server_name, server_config in enabled_servers.items():
         source = "dynamic" if server_name in dynamic_servers else "static"
         try:
@@ -220,23 +290,30 @@ async def start() -> None:
     if merged_servers:
         logger.info("MCP config: %d server(s) defined, %d enabled", len(merged_servers), len(enabled_servers))
 
+    # Detect owner identity from connected MCP services
+    await _detect_owner_context(mcp_manager)
+
     # Inject MCP manager into mcp_server tool
     mcp_tool = tools.get("mcp_server")
     if mcp_tool:
         mcp_tool.mcp_manager = mcp_manager
         mcp_tool._dynamic_config_path = dynamic_config_path
 
-    # Build merged tool list (native + MCP) and update provider
+    # Build tool list — only native tools in provider.tools (MCP loaded on demand)
     def rebuild_tools() -> None:
-        """Rebuild provider tool list from native tools + MCP tools."""
+        """Rebuild provider tool list with native tools only.
+
+        MCP tools are listed in system prompt hints but their schemas are loaded
+        on demand via mcp_server(action="use_tools") to avoid token bloat.
+        """
         mcp_tools = mcp_manager.get_all_tools()
-        provider.tools = merge_tools_for_provider(tools, mcp_tools, provider.api_format)
-        # Update tool hints for mention handler
+        provider.tools = format_tools_for_provider(tools, provider.api_format)
+        # Update tool hints (includes MCP tool names for AI awareness)
         nonlocal tool_hints
         tool_hints = merge_tool_hints(tools, mcp_tools)
         logger.info(
-            "Tool list rebuilt: %d native + %d MCP = %d total",
-            len(tools), len(mcp_tools), len(provider.tools),
+            "Tool list rebuilt: %d native (sent as schemas) + %d MCP (on-demand)",
+            len(tools), len(mcp_tools),
         )
 
     tool_hints = ""

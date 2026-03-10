@@ -144,74 +144,115 @@ def make_mention_handler(
 
         # --- Tool-call loop: core orchestrates, provider formats messages ---
         tool_names_used = []
-        for round_num in range(1, MAX_TOOL_ROUNDS + 1):
-            logger.info("--- Tool-call loop round %d/%d ---", round_num, MAX_TOOL_ROUNDS)
-            response = await provider.chat(messages)
+        # MCP lazy loading: track activated MCP tool schemas for this request.
+        # provider.tools contains only native tools; MCP schemas are added on demand.
+        original_tools = provider.tools
+        active_mcp_schemas: list[dict] = []
 
-            if not response.tool_calls:
-                text = response.text or "..."
-                preview = text[:_LOG_RESULT_MAX].replace("\n", " | ")
-                logger.info("AI returned text (round %d, length=%d): %s",
-                            round_num, len(text), preview)
+        try:
+            for round_num in range(1, MAX_TOOL_ROUNDS + 1):
+                logger.info("--- Tool-call loop round %d/%d ---", round_num, MAX_TOOL_ROUNDS)
 
-                # --- Save turn to database ---
-                if db:
-                    await _save_turn(db, user_id, channel_id, content, text, tool_names_used)
-                    await _maybe_summarize(db, provider, user_id, channel_id)
+                # Set provider tools = native + any activated MCP tool schemas
+                if active_mcp_schemas:
+                    provider.tools = original_tools + active_mcp_schemas
 
-                return text
+                response = await provider.chat(messages)
 
-            logger.info("AI requested %d tool call(s) in round %d: %s",
-                        len(response.tool_calls), round_num,
-                        [c.name for c in response.tool_calls])
+                if not response.tool_calls:
+                    text = response.text or "..."
+                    preview = text[:_LOG_RESULT_MAX].replace("\n", " | ")
+                    logger.info("AI returned text (round %d, length=%d): %s",
+                                round_num, len(text), preview)
 
-            # AI has consumed all current messages — compress old tool results
-            provider.compress_tool_results(messages, _COMPRESS_THRESHOLD)
+                    # --- Save turn to database ---
+                    if db:
+                        await _save_turn(db, user_id, channel_id, content, text, tool_names_used)
+                        await _maybe_summarize(db, provider, user_id, channel_id)
 
-            for call in response.tool_calls:
-                tool = tools.get(call.name)
-                is_mcp = False
+                    return text
 
-                if not tool and mcp_manager and mcp_manager.has_tool(call.name):
-                    is_mcp = True
-                elif not tool:
-                    logger.warning("Unknown tool requested: %s", call.name)
-                    provider.append_tool_result(messages, call, f"Error: unknown tool '{call.name}'")
-                    continue
+                logger.info("AI requested %d tool call(s) in round %d: %s",
+                            len(response.tool_calls), round_num,
+                            [c.name for c in response.tool_calls])
 
-                # Validate arguments against JSON Schema before executing.
-                schema = tool.parameters if tool else (mcp_manager.get_tool_schema(call.name) if mcp_manager else None)
-                if schema:
-                    try:
-                        jsonschema.validate(call.arguments, schema)
-                    except jsonschema.ValidationError as e:
-                        logger.warning("Invalid arguments for %s: %s", call.name, e.message)
-                        provider.append_tool_result(
-                            messages, call,
-                            f"Parameter error: {e.message}. Check the tool schema and retry.",
-                        )
+                # AI has consumed all current messages — compress old tool results
+                provider.compress_tool_results(messages, _COMPRESS_THRESHOLD)
+
+                for call in response.tool_calls:
+                    tool = tools.get(call.name)
+                    is_mcp = False
+
+                    if not tool and mcp_manager and mcp_manager.has_tool(call.name):
+                        is_mcp = True
+                    elif not tool:
+                        logger.warning("Unknown tool requested: %s", call.name)
+                        provider.append_tool_result(messages, call, f"Error: unknown tool '{call.name}'")
                         continue
 
-                logger.info("Executing %s tool: %s(%s)", "MCP" if is_mcp else "native", call.name, call.arguments)
-                try:
-                    if is_mcp:
-                        result = await mcp_manager.call_tool(call.name, call.arguments)
-                    else:
-                        result = await tool.execute(**call.arguments)
-                except Exception as e:
-                    logger.exception("Tool execution failed: %s", call.name)
-                    result = f"Error: {e}"
+                    # Validate arguments against JSON Schema before executing.
+                    schema = tool.parameters if tool else (
+                        mcp_manager.get_tool_schema(call.name) if mcp_manager else None)
+                    if schema:
+                        try:
+                            jsonschema.validate(call.arguments, schema)
+                        except jsonschema.ValidationError as e:
+                            logger.warning("Invalid arguments for %s: %s", call.name, e.message)
+                            provider.append_tool_result(
+                                messages, call,
+                                f"Parameter error: {e.message}. Check the tool schema and retry.",
+                            )
+                            continue
 
-                tool_names_used.append(call.name)
-                # Collapse newlines so multi-line results stay on one log line.
-                preview = result[:_LOG_RESULT_MAX].replace("\n", " | ")
-                logger.info("Tool result from %s (length=%d): %s",
-                            call.name, len(result), preview)
-                provider.append_tool_result(messages, call, result)
+                    logger.info("Executing %s tool: %s(%s)", "MCP" if is_mcp else "native", call.name, call.arguments)
+                    try:
+                        if is_mcp:
+                            result = await mcp_manager.call_tool(call.name, call.arguments)
+                        else:
+                            result = await tool.execute(**call.arguments)
+                    except Exception as e:
+                        logger.exception("Tool execution failed: %s", call.name)
+                        result = f"Error: {e}"
 
-            # Pause between rounds to avoid hitting provider API rate limits.
-            logger.debug("Sleeping 1s before next round")
-            await asyncio.sleep(1)
+                    tool_names_used.append(call.name)
+
+                    # Truncate excessively long results to prevent token overflow.
+                    # Limit comes from the endpoint's max_result_chars config.
+                    max_chars = provider.max_result_chars
+                    if len(result) > max_chars:
+                        truncated_len = len(result)
+                        result = (
+                                result[:max_chars]
+                                + f"\n\n[Truncated: showing {max_chars} of {truncated_len} chars. "
+                                  f"Use more specific queries to get smaller results.]"
+                        )
+                        logger.info("Truncated tool result from %s: %d -> %d chars",
+                                    call.name, truncated_len, len(result))
+
+                    # Collapse newlines so multi-line results stay on one log line.
+                    preview = result[:_LOG_RESULT_MAX].replace("\n", " | ")
+                    logger.info("Tool result from %s (length=%d): %s",
+                                call.name, len(result), preview)
+                    provider.append_tool_result(messages, call, result)
+
+                    # MCP lazy loading: detect use_tools activation and add schemas
+                    if (call.name == "mcp_server"
+                            and call.arguments.get("action") == "use_tools"
+                            and mcp_manager):
+                        requested = call.arguments.get("tools", [])
+                        if requested:
+                            _activate_mcp_tools(
+                                requested, mcp_manager, provider.api_format,
+                                active_mcp_schemas,
+                            )
+
+                # Pause between rounds to avoid hitting provider API rate limits.
+                logger.debug("Sleeping 1s before next round")
+                await asyncio.sleep(1)
+
+        finally:
+            # Restore original tools (native only) so other requests aren't affected
+            provider.tools = original_tools
 
         logger.warning("Tool-call loop hit max rounds (%d)", MAX_TOOL_ROUNDS)
         max_round_reply = "Sorry, I got stuck in a loop. Please try again."
@@ -222,6 +263,45 @@ def make_mention_handler(
         return max_round_reply
 
     return handle_mention
+
+
+def _activate_mcp_tools(
+        requested_names: list[str],
+        mcp_manager: MCPManager,
+        api_format: str,
+        active_schemas: list[dict],
+) -> None:
+    """Look up MCP tool wrappers by name and add their formatted schemas.
+
+    Called when AI uses mcp_server(action="use_tools") to activate MCP tools
+    for the current request. Schemas are added to active_schemas so they appear
+    in subsequent provider.chat() calls.
+    """
+    wrappers = mcp_manager.get_tools_by_names(requested_names)
+    if not wrappers:
+        return
+
+    # Track already-active tool names to avoid duplicates
+    existing_names = set()
+    method_name = f"to_{api_format}"
+    for schema in active_schemas:
+        # OpenAI format: schema["function"]["name"], Anthropic: schema["name"]
+        if "function" in schema:
+            existing_names.add(schema["function"]["name"])
+        elif "name" in schema:
+            existing_names.add(schema["name"])
+
+    added = []
+    for wrapper in wrappers:
+        if wrapper.name in existing_names:
+            continue
+        method = getattr(wrapper, method_name, None)
+        if method:
+            active_schemas.append(method())
+            added.append(wrapper.name)
+
+    if added:
+        logger.info("Activated %d MCP tool schema(s): %s", len(added), ", ".join(added))
 
 
 def _build_user_prompt(

@@ -1,0 +1,35 @@
+@startuml
+title REQ-008 MCP On-Demand Loading - Use Cases
+
+actor "User" as user
+actor "AI Provider" as ai
+
+rectangle "Synapulse Bot" {
+  usecase "Chat with AI" as UC1
+  usecase "Activate MCP Tools" as UC2
+  usecase "Call MCP Tool" as UC3
+  usecase "Truncate Long Results" as UC4
+  usecase "Auto-Detect Owner" as UC5
+  usecase "Configure max_result_chars" as UC6
+}
+
+user --> UC1
+UC1 --> UC2 : AI needs MCP tool
+UC2 --> UC3 : schemas loaded
+UC3 --> UC4 : result too long
+user --> UC6 : via models.yaml
+
+ai --> UC2 : calls use_tools
+ai --> UC3 : calls MCP tool
+
+UC5 .> UC1 : enriches prompt
+note right of UC5
+  Runs at startup if
+  GitHub MCP is connected
+end note
+
+note right of UC4
+  Limit per endpoint
+  from models.yaml
+end note
+@enduml

@@ -31,9 +31,10 @@ class Tool(OpenAITool, AnthropicTool):
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["add", "remove", "list", "list_tools"],
+                "enum": ["add", "remove", "list", "list_tools", "use_tools"],
                 "description": (
                     "Action to perform. "
+                    "'use_tools' activates MCP tools by name so you can call them directly. "
                     "'add' connects a new MCP server process. "
                     "'remove' disconnects and removes a dynamically added server. "
                     "'list' shows connected servers. "
@@ -61,6 +62,11 @@ class Tool(OpenAITool, AnthropicTool):
                 "type": "integer",
                 "description": "Connection timeout in milliseconds (for add, default 30000)",
             },
+            "tools": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of MCP tool names to activate (for use_tools action)",
+            },
         },
         "required": ["action"],
     }
@@ -81,6 +87,8 @@ class Tool(OpenAITool, AnthropicTool):
         if not self.mcp_manager:
             return "Error: MCP manager not available"
 
+        if action == "use_tools":
+            return self._use_tools(**kwargs)
         if action == "add":
             return await self._add(**kwargs)
         if action == "remove":
@@ -91,6 +99,35 @@ class Tool(OpenAITool, AnthropicTool):
             return self._list_tools(**kwargs)
 
         return f"Error: unknown action '{action}'"
+
+    def _use_tools(self, tools: list[str] | None = None, **_: Any) -> str:
+        """Activate MCP tools by name so they become callable.
+
+        The mention handler detects this action and adds the tool schemas
+        to the API request for subsequent rounds.
+        """
+        if not tools:
+            return "Error: provide a list of MCP tool names to activate"
+
+        available = {t.name for t in self.mcp_manager.get_all_tools()}
+        found = []
+        not_found = []
+        for name in tools:
+            if name in available:
+                found.append(name)
+            else:
+                not_found.append(name)
+
+        if not found:
+            return (
+                f"Error: none of the requested tools were found. "
+                f"Available MCP tools: {', '.join(sorted(available)[:20])}"
+            )
+
+        result = f"Activated {len(found)} MCP tool(s): {', '.join(found)}. You can now call them directly."
+        if not_found:
+            result += f"\nNot found: {', '.join(not_found)}"
+        return result
 
     async def _add(
             self,

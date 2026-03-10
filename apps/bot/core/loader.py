@@ -77,14 +77,25 @@ def merge_tools_for_provider(
 
 
 def merge_tool_hints(native_tools: dict, mcp_tools: list) -> str:
-    """Build combined tool hints for system prompt from native tools and MCP tools."""
+    """Build combined tool hints for system prompt from native tools and MCP tools.
+
+    MCP tools are listed separately with activation instructions — their schemas
+    are loaded on demand to avoid token bloat.
+    """
     lines = []
     for tool in native_tools.values():
         hint = tool.usage_hint or tool.description
         lines.append(f"- {tool.name}: {hint}")
-    for wrapper in mcp_tools:
-        hint = wrapper.usage_hint or wrapper.description
-        lines.append(f"- {wrapper.name}: {hint}")
+
+    if mcp_tools:
+        lines.append("")
+        lines.append(
+            "MCP tools (call mcp_server with action=\"use_tools\" and "
+            "tools=[\"name1\", ...] to activate before using):"
+        )
+        for wrapper in mcp_tools:
+            lines.append(f"  - {wrapper.name}: {wrapper.description}")
+
     return "\n".join(lines)
 
 

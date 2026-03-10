@@ -13,14 +13,11 @@
       "timeout": 30000
     },
     "github": {
-      "enabled": false,
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-github"
-      ],
+      "enabled": true,
+      "command": "mcp-server-github",
+      "args": [],
       "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": ""
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PAT}"
       },
       "timeout": 30000
     },
@@ -35,12 +32,9 @@
       "timeout": 30000
     },
     "puppeteer": {
-      "enabled": false,
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-puppeteer"
-      ],
+      "enabled": true,
+      "command": "mcp-server-puppeteer",
+      "args": [],
       "env": {},
       "timeout": 30000
     },
@@ -113,10 +107,11 @@
       "timeout": 30000
     },
     "fetch": {
-      "enabled": false,
-      "command": "uvx",
+      "enabled": true,
+      "command": "python",
       "args": [
-        "mcp-server-fetch"
+        "-m",
+        "mcp_server_fetch"
       ],
       "env": {},
       "timeout": 30000

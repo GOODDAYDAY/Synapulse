@@ -252,4 +252,6 @@ def test_merge_tool_hints():
 
     result = merge_tool_hints(native, mcp)
     assert "search: Search for anything" in result
-    assert "github: Manage GitHub" in result
+    # MCP tools now show description (not usage_hint) and include activation instructions
+    assert "github: GitHub tools" in result
+    assert "use_tools" in result

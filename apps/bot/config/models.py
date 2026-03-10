@@ -36,6 +36,7 @@ class EndpointConfig:
     tags: list[str] = field(default_factory=list)
     enabled: bool = True
     priority: int = 0
+    max_result_chars: int = 16000
 
 
 def load_models_config(path: str) -> list[EndpointConfig]:
@@ -145,6 +146,7 @@ def _validate_endpoint(raw: dict, index: int) -> EndpointConfig:
         tags=tags,
         enabled=bool(raw.get("enabled", True)),
         priority=int(raw.get("priority", 0)),
+        max_result_chars=int(raw.get("max_result_chars", 16000)),
     )
 
 
