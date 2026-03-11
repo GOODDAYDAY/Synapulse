@@ -353,8 +353,19 @@ async def start() -> None:
         )
         await channel.wait_until_ready()
 
+        # Build on_prompt callback for prompt-mode reminders:
+        # reuses the same mention handler so AI processes the message with full tool access.
+        mention_handler = make_mention_handler(
+            provider, tools, channel.send_file, db, mcp_manager,
+            tool_hints_ref=lambda: tool_hints,
+        )
+
+        async def on_prompt(content: str, channel_id: str) -> str:
+            """Feed reminder message to AI as if user sent it."""
+            return await mention_handler(content, channel_id)
+
         # Start reminder checker (background task polling for due reminders)
-        asyncio.create_task(start_reminder_checker(db, channel.send))
+        asyncio.create_task(start_reminder_checker(db, channel.send, on_prompt))
         logger.info("Reminder checker started")
 
         # Start MCP config hot-reload watcher

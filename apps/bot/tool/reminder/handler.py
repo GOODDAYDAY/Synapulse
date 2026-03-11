@@ -1,11 +1,13 @@
 """Reminder tool — create, list, and cancel timed reminders.
 
-AI resolves natural language time into ISO 8601 timestamps.
-The tool validates and stores them; a background checker fires them.
+Supports both absolute (ISO 8601) and relative (+5m, +1h30m) time formats.
+Relative time is resolved server-side via datetime.now() — AI does not need
+to know the current time.
 """
 
 import logging
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timedelta, timezone
 
 from apps.bot.tool.base import AnthropicTool, OpenAITool
 
@@ -13,10 +15,30 @@ logger = logging.getLogger("synapulse.tool.reminder")
 
 _DEFAULT_USER = "default"
 
+# Matches "+5m", "+1h", "+2h30m", "+1d12h", "+1d2h30m", etc.
+_RELATIVE_RE = re.compile(
+    r"^\+(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?$"
+)
 
-def _parse_time(remind_at: str) -> datetime:
+
+def _parse_relative(remind_at: str) -> datetime | None:
+    """Try to parse a relative time offset like +5m, +1h30m, +1d.
+
+    Returns absolute datetime (UTC) or None if not a relative format.
+    """
+    m = _RELATIVE_RE.match(remind_at.strip())
+    if not m:
+        return None
+    days = int(m.group(1) or 0)
+    hours = int(m.group(2) or 0)
+    minutes = int(m.group(3) or 0)
+    if days == 0 and hours == 0 and minutes == 0:
+        return None  # "+0m" or bare "+" is invalid
+    return datetime.now(timezone.utc) + timedelta(days=days, hours=hours, minutes=minutes)
+
+
+def _parse_absolute(remind_at: str) -> datetime:
     """Parse ISO 8601 timestamp string into datetime. Raises ValueError on failure."""
-    # Accept common formats: with/without timezone, with/without seconds
     for fmt in (
             "%Y-%m-%dT%H:%M:%S%z",
             "%Y-%m-%dT%H:%M:%S",
@@ -32,10 +54,22 @@ def _parse_time(remind_at: str) -> datetime:
     raise ValueError(f"Cannot parse time: '{remind_at}'")
 
 
+def _parse_time(remind_at: str) -> datetime:
+    """Parse remind_at as relative (+5m) or absolute (ISO 8601).
+
+    Relative formats are resolved to absolute datetime server-side.
+    """
+    # Try relative first (cheap regex check)
+    dt = _parse_relative(remind_at)
+    if dt:
+        return dt
+    return _parse_absolute(remind_at)
+
+
 def _format_time(iso: str) -> str:
     """Format ISO timestamp for display."""
     try:
-        dt = _parse_time(iso)
+        dt = _parse_absolute(iso)
         return dt.strftime("%Y-%m-%d %H:%M")
     except ValueError:
         return iso
@@ -47,11 +81,19 @@ class Tool(OpenAITool, AnthropicTool):
         "Manage reminders. "
         "Actions: create (set a timed reminder), list (show pending reminders), "
         "cancel (remove a reminder by ID). "
-        "Time must be in ISO 8601 format (e.g. 2026-03-10T15:00:00)."
+        "Time supports relative offset (+5m, +1h, +2h30m, +1d) "
+        "or absolute ISO 8601 (e.g. 2026-03-10T15:00:00). "
+        "Mode: 'notify' for passive reminders (e.g. 喝水), "
+        "'prompt' when the bot should act on it (e.g. 告诉我天气)."
     )
     usage_hint = (
-        "Set, list, or cancel reminders. AI must convert natural language time "
-        "to ISO 8601 format before calling create."
+        "Set, list, or cancel reminders. "
+        "For 'in X minutes/hours' requests, use relative time: +5m, +1h, +2h30m, +1d. "
+        "For specific date/time, use ISO 8601: 2026-03-10T15:00:00. "
+        "The tool resolves relative time automatically — do NOT calculate time yourself. "
+        "Use mode='notify' for passive nudges (提醒我喝水, 提醒我开会). "
+        "Use mode='prompt' when the user wants the bot to DO something at that time "
+        "(告诉我现在时间, 帮我查天气, 总结今天的任务)."
     )
     parameters = {
         "type": "object",
@@ -67,7 +109,11 @@ class Tool(OpenAITool, AnthropicTool):
             },
             "remind_at": {
                 "type": "string",
-                "description": "ISO 8601 datetime for the reminder (e.g. 2026-03-10T15:00:00)",
+                "description": (
+                    "When to remind. "
+                    "Relative: +5m, +1h, +2h30m, +1d (offset from now). "
+                    "Absolute: ISO 8601 (e.g. 2026-03-10T15:00:00)."
+                ),
             },
             "message": {
                 "type": "string",
@@ -77,6 +123,15 @@ class Tool(OpenAITool, AnthropicTool):
                 "type": "string",
                 "enum": ["daily", "weekly"],
                 "description": "Optional recurrence pattern",
+            },
+            "mode": {
+                "type": "string",
+                "enum": ["notify", "prompt"],
+                "description": (
+                    "notify (default): send static text reminder. "
+                    "prompt: feed message to AI as user input when reminder fires "
+                    "(use when user wants the bot to DO something, e.g. check weather, tell time)."
+                ),
             },
             "reminder_id": {
                 "type": "integer",
@@ -95,44 +150,55 @@ class Tool(OpenAITool, AnthropicTool):
 
     async def execute(
             self, action: str, remind_at: str = "", message: str = "",
-            recurrence: str | None = None, reminder_id: int = 0,
+            recurrence: str | None = None, mode: str = "notify",
+            reminder_id: int = 0,
     ) -> str:
         if not self.db:
             return "Error: database not available"
         if action == "create":
-            return await self._create(remind_at, message, recurrence)
+            return await self._create(remind_at, message, recurrence, mode)
         if action == "list":
             return await self._list()
         if action == "cancel":
             return await self._cancel(reminder_id)
         return f"Error: unknown action '{action}'"
 
-    async def _create(self, remind_at: str, message: str, recurrence: str | None) -> str:
+    async def _create(self, remind_at: str, message: str, recurrence: str | None, mode: str) -> str:
         if not remind_at:
-            return "Error: 'remind_at' (ISO 8601 datetime) is required for create action"
+            return "Error: 'remind_at' is required (e.g. +5m, +1h, or 2026-03-10T15:00:00)"
         if not message:
             return "Error: 'message' is required for create action"
 
-        # Validate timestamp format
+        # Parse time — supports both relative (+5m) and absolute (ISO 8601)
         try:
             dt = _parse_time(remind_at)
         except ValueError as e:
-            return f"Error: {e}. Please use ISO 8601 format (e.g. 2026-03-10T15:00:00)."
+            return (
+                f"Error: {e}. Use relative (+5m, +1h, +2h30m) "
+                f"or ISO 8601 (2026-03-10T15:00:00)."
+            )
+
+        # Convert to ISO 8601 string for storage
+        remind_at_iso = dt.strftime("%Y-%m-%dT%H:%M:%S")
 
         # Warn if time is in the past (but still allow — checker will fire immediately)
-        # Ensure both are timezone-aware for comparison
         dt_aware = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
         if dt_aware < now:
-            logger.warning("Reminder time is in the past: %s", remind_at)
+            logger.warning("Reminder time is in the past: %s", remind_at_iso)
+
+        # Validate mode
+        if mode not in ("notify", "prompt"):
+            mode = "notify"
 
         reminder_id = await self.db.create_reminder(
-            _DEFAULT_USER, self.channel_id, remind_at, message, recurrence,
+            _DEFAULT_USER, self.channel_id, remind_at_iso, message, recurrence, mode,
         )
-        display = _format_time(remind_at)
+        display = _format_time(remind_at_iso)
         recur_note = f" (repeats {recurrence})" if recurrence else ""
-        logger.info("Created reminder #%d at %s%s", reminder_id, display, recur_note)
-        return f"Reminder #{reminder_id} set for {display}{recur_note}: {message}"
+        mode_note = " [AI will process]" if mode == "prompt" else ""
+        logger.info("Created reminder #%d at %s%s (mode=%s)", reminder_id, display, recur_note, mode)
+        return f"Reminder #{reminder_id} set for {display}{recur_note}{mode_note}: {message}"
 
     async def _list(self) -> str:
         reminders = await self.db.list_reminders(_DEFAULT_USER)

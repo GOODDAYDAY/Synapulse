@@ -250,8 +250,12 @@ class Database:
     async def create_reminder(
             self, user_id: str, channel_id: str,
             remind_at: str, message: str, recurrence: str | None = None,
+            mode: str = "notify",
     ) -> int:
-        """Create a reminder, return its ID."""
+        """Create a reminder, return its ID.
+
+        mode: "notify" = static text notification, "prompt" = feed message to AI.
+        """
         path = self._path(_REMINDERS_FILE)
         data = _load_json(path)
         reminder_id = self._next_id("reminders")
@@ -262,11 +266,12 @@ class Database:
             "message": message,
             "remind_at": remind_at,
             "recurrence": recurrence,
+            "mode": mode,
             "fired": 0,
             "created_at": _now(),
         })
         _save_json(path, data)
-        logger.info("Created reminder #%d for user=%s at %s", reminder_id, user_id, remind_at)
+        logger.info("Created reminder #%d for user=%s at %s (mode=%s)", reminder_id, user_id, remind_at, mode)
         return reminder_id
 
     async def list_reminders(self, user_id: str) -> list[dict]:

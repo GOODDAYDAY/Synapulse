@@ -7,28 +7,46 @@
 Synapse + Pulse — A personal assistant powered by Discord and AI.
 
 Synapulse is a self-hosted AI assistant that lives in your Discord server. Talk to it by @mentioning, and it will search
-the web, manage your to-do list, take notes, set reminders, summarize your emails, and more. It remembers your
-conversations across sessions and can be extended with new tools or connected to hundreds of external services via MCP.
+the web, manage your to-do list, take notes, set reminders, summarize your emails, execute shell commands, and more. It
+remembers your conversations across sessions and can be extended with new tools or connected to hundreds of external
+services via MCP.
+
+## Demo
+
+|                             Weather query                             |                     Web search + recommendation                      |
+|:---------------------------------------------------------------------:|:--------------------------------------------------------------------:|
+| ![Weather](images/display/1.%20what%20is%20the%20weather%20today.gif) | ![Keyboard](images/display/2.%20recommend%20me%20one%20keyboard.gif) |
+
+|                                Reminder (notify mode)                                 |                           Reminder (prompt mode)                            |
+|:-------------------------------------------------------------------------------------:|:---------------------------------------------------------------------------:|
+| ![Notify](images/display/3.%20notify%20me%20drink%20water%20after%201%20minutes..gif) | ![Prompt](images/display/4.%20notify%20me%20news%20after%201%20minutes.gif) |
 
 ## Features
 
 - **AI Chat** — @mention the bot in Discord to chat. Supports multiple AI providers out of the box.
 - **Tool Calling** — AI can use tools in a multi-round loop (up to 10 rounds per message). Tools are auto-discovered at
   startup — drop in a new folder and restart.
+- **Shell Execution** — The AI proactively uses shell commands for system queries, calculations, git operations, and
+  more. Cross-platform: PowerShell on Windows, bash on Linux/macOS.
 - **Persistent Memory** — Conversations are saved and summarized automatically. The bot remembers what you talked about
   yesterday, last week, or last month.
 - **Task Management** — Track to-dos with priorities and due dates. The AI sees your pending tasks and can remind you
   proactively.
 - **Memo / Notes** — Save and search personal notes. Ask "what did I save about X?" and the AI will find it.
-- **Reminders** — Set reminders in natural language ("remind me to call mom in 2 hours"). Supports recurring schedules.
+- **Reminders** — Set reminders with relative time (`+5m`, `+1h`) or absolute time. Two modes: **notify** for passive
+  nudges, **prompt** for scheduled AI actions (e.g. "tell me the weather in 1 hour" — the bot actually checks the
+  weather when the time comes).
+- **File Operations** — Read, write, search, and manage local files within allowed paths.
 - **Email Monitoring** — Background jobs watch Gmail, Outlook, and QQ Mail via IMAP, summarize new emails with AI, and
   push notifications to Discord.
 - **MCP Integration** — Connect to any [MCP](https://modelcontextprotocol.io/) server (GitHub, Notion, filesystem,
-  databases, etc.) to instantly add hundreds of tools without writing code.
+  databases, etc.) to instantly add hundreds of tools without writing code. On-demand tool loading keeps token usage
+  low.
+- **Multi-Model Rotation** — YAML-based multi-endpoint config with tag filtering, round-robin rotation, and automatic
+  rate-limit fallback.
 - **Notification Interaction** — Reply to any bot message (email notification, previous answer) and the AI sees the
   original content as context.
-- **Hot-Reload Config** — Job schedules, prompts, and enabled/disabled states live in a JSON file. Edit at runtime, no
-  restart needed.
+- **Hot-Reload Config** — Models, MCP servers, and job schedules can be updated at runtime — no restart needed.
 
 ## Quick Start
 
@@ -153,11 +171,19 @@ deadlines.
 
 ### Setting Reminders
 
-> **@Synapulse** remind me to call the dentist in 2 hours
+> **@Synapulse** remind me to drink water in 5 minutes
+
+> **@Synapulse** tell me the weather in 1 hour
 
 > **@Synapulse** remind me every Monday at 9am to check reports
 
-The bot fires reminders at the scheduled time in the same channel.
+The bot supports two reminder modes:
+
+- **Notify** — passive nudges like "drink water" (static text)
+- **Prompt** — scheduled AI actions like "tell me the weather" (the bot actually runs the request when the time comes)
+
+The AI picks the right mode automatically. Relative time (`+5m`, `+1h`, `+2h30m`) and absolute time (ISO 8601) are both
+supported.
 
 ## Extending Synapulse
 
@@ -274,14 +300,16 @@ Browse available MCP servers at [MCP Server Directory](https://github.com/modelc
 
 ## Built-in Tools
 
-| Tool           | Description                               | Requires                    |
-|:---------------|:------------------------------------------|:----------------------------|
-| `brave_search` | Search the web via Brave Search API       | `BRAVE_API_KEY`             |
-| `local_files`  | Browse local files (read-only)            | `LOCAL_FILES_ALLOWED_PATHS` |
-| `memo`         | Save, search, list, delete personal notes | —                           |
-| `reminder`     | Set timed and recurring reminders         | —                           |
-| `task`         | To-do list with priority and due dates    | —                           |
-| `mcp_server`   | Manage MCP server connections             | —                           |
+| Tool           | Description                                                  | Requires                    |
+|:---------------|:-------------------------------------------------------------|:----------------------------|
+| `shell_exec`   | Execute shell commands (cross-platform: PowerShell / bash)   | `LOCAL_FILES_ALLOWED_PATHS` |
+| `local_files`  | Read, write, search, and manage local files                  | `LOCAL_FILES_ALLOWED_PATHS` |
+| `brave_search` | Search the web via Brave Search API                          | `BRAVE_API_KEY`             |
+| `weather`      | Current weather and 3-day forecast via OpenWeatherMap        | `OPENWEATHER_API_KEY`       |
+| `memo`         | Save, search, list, delete personal notes                    | —                           |
+| `reminder`     | Timed reminders with notify/prompt modes and relative time   | —                           |
+| `task`         | To-do list with priority and due dates                       | —                           |
+| `mcp_server`   | Manage MCP server connections (add, remove, list, use tools) | —                           |
 
 ## Project Structure
 
@@ -289,14 +317,16 @@ Browse available MCP servers at [MCP Server Directory](https://github.com/modelc
 Synapulse/
 ├── apps/bot/                    # Main application
 │   ├── main.py                  # Entry point
-│   ├── config/                  # Settings, prompts, job config, MCP config
-│   ├── core/                    # Orchestration (bootstrap, tool-call loop, loader)
+│   ├── config/                  # Settings, prompts, logging
+│   ├── core/                    # Orchestration (bootstrap, tool-call loop, loader, reminder checker)
 │   ├── provider/                # AI providers (mock, copilot, ollama)
 │   ├── channel/                 # Platform I/O (discord)
 │   ├── tool/                    # AI tools (auto-discovered)
 │   ├── job/                     # Background jobs (auto-discovered)
 │   ├── mcp/                     # MCP client manager
 │   └── memory/                  # Persistent storage (JSON-based)
+├── config/                      # Runtime config (models.yaml, mcp.json, jobs.json)
+├── output/                      # Runtime output (logs, data)
 ├── tests/                       # Unit tests (pytest)
 ├── scripts/                     # Build, test, run scripts
 ├── requirements/                # Requirement & design documents
