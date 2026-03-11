@@ -21,6 +21,10 @@ services via MCP.
 |:-------------------------------------------------------------------------------------:|:---------------------------------------------------------------------------:|
 | ![Notify](images/display/3.%20notify%20me%20drink%20water%20after%201%20minutes..gif) | ![Prompt](images/display/4.%20notify%20me%20news%20after%201%20minutes.gif) |
 
+|                                            File creation + send                                             |
+|:-----------------------------------------------------------------------------------------------------------:|
+| ![File](images/display/5.%20create%20a%20file%20contains%20news%20about%20irar%20and%20send%20to%20me..gif) |
+
 ## Features
 
 - **AI Chat** — @mention the bot in Discord to chat. Supports multiple AI providers out of the box.
