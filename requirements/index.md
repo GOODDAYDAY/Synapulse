@@ -10,3 +10,4 @@
 | REQ-006 | Multi-Model Rotation & Auto-Fallback       | Development Done | 2026-03-10 | YAML-based multi-endpoint config with tag filtering, round-robin rotation, and rate-limit fallback   |
 | REQ-007 | Config & Output Directory Reorganization   | Development Done | 2026-03-10 | Unify runtime config to top-level config/ and all output to output/ for cleaner project layout       |
 | REQ-008 | MCP On-Demand Loading & Token Optimization | Development Done | 2026-03-11 | Lazy MCP tool schema loading, per-model result truncation, and auto-detect owner from GitHub MCP     |
+| REQ-009 | Shell-First Behavior Strategy              | Completed        | 2026-03-11 | Elevate shell_exec from fallback to primary tool with proactive usage guidance                       |
